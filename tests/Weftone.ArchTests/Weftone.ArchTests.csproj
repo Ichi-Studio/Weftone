@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter" />
+    <PackageReference Include="NetArchTest.Rules" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Weftone.Abstractions\Weftone.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Weftone.Engine\Weftone.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Weftone.Adapters.Audio.Miniaudio\Weftone.Adapters.Audio.Miniaudio.csproj" />
+    <ProjectReference Include="..\..\tools\HeadlessRender\HeadlessRender.csproj" />
+  </ItemGroup>
+
+</Project>
