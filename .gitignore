@@ -440,6 +440,7 @@ native/clap_bridge/build/
 
 # 本地音频渲染产物
 *.wav
+!tests/Weftone.GoldenAudio/baselines/*.wav
 
 # OS
 Thumbs.db

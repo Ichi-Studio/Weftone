@@ -42,6 +42,11 @@ jobs:
           dotnet run --project tools/HeadlessRender -c Release --no-build --
           render --seconds 1 --out artifacts/m0-smoke.wav
 
+      - name: 全链冒烟（demo 工程渲染）
+        run: |
+          dotnet run --project tools/HeadlessRender -c Release --no-build -- demo --out artifacts/demo.weft
+          dotnet run --project tools/HeadlessRender -c Release --no-build -- project render artifacts/demo.weft --out artifacts/demo-render.wav
+
       - name: 校验 WAV 尺寸
         shell: bash
         run: |
@@ -51,3 +56,4 @@ jobs:
             echo "WAV 尺寸异常: $size != $expected (44 + 48000*1*2*4)"
             exit 1
           fi
+          [ -s artifacts/demo-render.wav ] || { echo "demo 渲染为空"; exit 1; }

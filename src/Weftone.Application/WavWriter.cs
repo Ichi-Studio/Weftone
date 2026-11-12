@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 
-namespace Weftone.Tools.HeadlessRender;
+namespace Weftone.Application;
 
 /// <summary>WAVE_FORMAT_IEEE_FLOAT（32-bit 小端）WAV 写出：先写头，再流式追加样本。</summary>
 public static class WavWriter
@@ -13,7 +13,7 @@ public static class WavWriter
         long riffSize = 36 + dataBytes;
         if (riffSize > uint.MaxValue)
         {
-            throw new ArgumentOutOfRangeException(nameof(totalSamples), "M0 单 WAV 上限 4GB");
+            throw new ArgumentOutOfRangeException(nameof(totalSamples), "M1a 单 WAV 上限 4GB");
         }
 
         Span<byte> header = stackalloc byte[44];

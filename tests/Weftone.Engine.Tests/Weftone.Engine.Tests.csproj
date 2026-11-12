@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Weftone.Engine\Weftone.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Weftone.Application\Weftone.Application.csproj" />
     <ProjectReference Include="..\..\tools\HeadlessRender\HeadlessRender.csproj" />
   </ItemGroup>
 

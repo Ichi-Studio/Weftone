@@ -8,7 +8,7 @@ namespace Weftone.Engine;
 /// Sine：双精度相位；Sampler：资产线性插值、MIDI60=原速、资产耗尽自然结束。
 /// 全程零分配（RtAssert 守护）。
 /// </summary>
-public sealed class PlanRenderer
+public sealed class PlanRenderer : IPlanRenderer
 {
     private const int MaxVoices = 64;
     private const int FadeTail = 128;

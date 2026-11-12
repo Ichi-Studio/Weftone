@@ -13,6 +13,7 @@
     <Project Path="tests/Weftone.ArchTests/Weftone.ArchTests.csproj" />
     <Project Path="tests/Weftone.Domain.Tests/Weftone.Domain.Tests.csproj" />
     <Project Path="tests/Weftone.Engine.Tests/Weftone.Engine.Tests.csproj" />
+    <Project Path="tests/Weftone.GoldenAudio/Weftone.GoldenAudio.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/HeadlessRender/HeadlessRender.csproj" />
