@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>weftone</AssemblyName>
+    <RootNamespace>Weftone.Tools.HeadlessRender</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Weftone.Engine\Weftone.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Weftone.Adapters.Audio.Miniaudio\Weftone.Adapters.Audio.Miniaudio.csproj" />
+  </ItemGroup>
+
+</Project>
