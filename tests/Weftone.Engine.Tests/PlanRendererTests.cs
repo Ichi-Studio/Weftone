@@ -113,4 +113,118 @@ public class PlanRendererTests
         Assert.That(RtAssert.Violations, Is.EqualTo(0),
             "渲染路径出现托管分配（RT_ASSERT 构建下此断言有效）");
     }
+
+    private static RenderVoice SamplerVoice(long start, long gate, float rate = 1f,
+        float gainLeft = 1f, float gainRight = 1f, int assetIndex = 0) => new()
+    {
+        StartSample = start,
+        LengthSamples = gate,
+        Kind = RenderVoiceKind.Sampler,
+        Frequency = rate,
+        GainLeft = gainLeft,
+        GainRight = gainRight,
+        AssetIndex = assetIndex,
+    };
+
+    private static PlanAsset MonoAsset(params float[] samples) => new()
+    {
+        Samples = samples,
+        Channels = 1,
+        Frames = samples.Length,
+    };
+
+    [Test]
+    public void Sampler_plays_mono_asset_verbatim_at_unit_rate()
+    {
+        var renderer = new PlanRenderer();
+        renderer.Load(new RenderPlan
+        {
+            SampleRate = SampleRate,
+            Channels = 2,
+            TotalSamples = 6,
+            Voices = [SamplerVoice(0, 512)],
+            Assets = [MonoAsset(0.25f, -0.5f, 0.75f, 1f)],
+        });
+        float[] buffer = new float[2 * 4];
+        renderer.Render(buffer);
+        Assert.Multiple(() =>
+        {
+            Assert.That(buffer[0], Is.EqualTo(0.25f).Within(1e-6f));
+            Assert.That(buffer[1], Is.EqualTo(0.25f).Within(1e-6f), "mono 双声道同值");
+            Assert.That(buffer[2], Is.EqualTo(-0.5f).Within(1e-6f));
+            Assert.That(buffer[3], Is.EqualTo(-0.5f).Within(1e-6f));
+        });
+    }
+
+    [Test]
+    public void Sampler_interpolates_at_half_rate()
+    {
+        var renderer = new PlanRenderer();
+        renderer.Load(new RenderPlan
+        {
+            SampleRate = SampleRate,
+            Channels = 2,
+            TotalSamples = 8,
+            Voices = [SamplerVoice(0, 512, rate: 0.5f)],
+            Assets = [MonoAsset(0f, 1f, 0f)],
+        });
+        float[] buffer = new float[2 * 4];
+        renderer.Render(buffer);
+        Assert.Multiple(() =>
+        {
+            Assert.That(buffer[0], Is.EqualTo(0f).Within(1e-6f), "pos 0");
+            Assert.That(buffer[2], Is.EqualTo(0.5f).Within(1e-6f), "pos 0.5 线性插值");
+            Assert.That(buffer[4], Is.EqualTo(1f).Within(1e-6f), "pos 1");
+            Assert.That(buffer[6], Is.EqualTo(0.5f).Within(1e-6f), "pos 1.5 线性插值");
+        });
+    }
+
+    [Test]
+    public void Sampler_stereo_asset_maps_channels_with_gains()
+    {
+        var renderer = new PlanRenderer();
+        var stereo = new PlanAsset
+        {
+            Samples = [0.5f, -0.5f, 0.25f, -0.25f],
+            Channels = 2,
+            Frames = 2,
+        };
+        renderer.Load(new RenderPlan
+        {
+            SampleRate = SampleRate,
+            Channels = 2,
+            TotalSamples = 4,
+            Voices = [SamplerVoice(0, 512, gainLeft: 1f, gainRight: 0.5f)],
+            Assets = [stereo],
+        });
+        float[] buffer = new float[2 * 2];
+        renderer.Render(buffer);
+        Assert.Multiple(() =>
+        {
+            Assert.That(buffer[0], Is.EqualTo(0.5f).Within(1e-6f));
+            Assert.That(buffer[1], Is.EqualTo(-0.25f).Within(1e-6f));
+        });
+    }
+
+    [Test]
+    public void Sampler_falls_silent_when_asset_exhausts_before_gate()
+    {
+        var renderer = new PlanRenderer();
+        renderer.Load(new RenderPlan
+        {
+            SampleRate = SampleRate,
+            Channels = 2,
+            TotalSamples = 8,
+            Voices = [SamplerVoice(0, 512)],
+            Assets = [MonoAsset(0.5f, 0.5f, 0.5f)],
+        });
+        float[] buffer = new float[2 * 6];
+        renderer.Render(buffer);
+        Assert.Multiple(() =>
+        {
+            Assert.That(buffer[0], Is.EqualTo(0.5f).Within(1e-6f));
+            Assert.That(buffer[4], Is.EqualTo(0.5f).Within(1e-6f));
+            Assert.That(buffer[6], Is.EqualTo(0f).Within(1e-6f), "资产耗尽后静音");
+        });
+    }
 }

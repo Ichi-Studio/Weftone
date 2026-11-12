@@ -5,7 +5,8 @@ namespace Weftone.Engine;
 /// <summary>
 /// RenderPlan 离线/实时两用渲染器：64 复音预分配池，事件按 StartSample 顺序激活，
 /// 池满时最早结束者被偷（FadeTail 线性淡出防 click），新事件入 pending 环等位。
-/// 全程零分配（RtAssert 守护）。M1a 竖切 2：仅渲染 Sine 声部。
+/// Sine：双精度相位；Sampler：资产线性插值、MIDI60=原速、资产耗尽自然结束。
+/// 全程零分配（RtAssert 守护）。
 /// </summary>
 public sealed class PlanRenderer
 {
@@ -21,6 +22,9 @@ public sealed class PlanRenderer
         public long Remaining;
         public double Phase;
         public double PhaseDelta;
+        public double AssetPosition;
+        public int AssetIndex;
+        public float Frequency;
         public float GainLeft;
         public float GainRight;
         public RenderVoiceKind Kind;
@@ -80,11 +84,11 @@ public sealed class PlanRenderer
             }
             if (voice.StealFade > 0)
             {
-                RenderFadeTail(ref voice, interleaved, frames);
+                RenderFadeTail(ref voice, plan.Assets, interleaved, frames);
             }
             else
             {
-                RenderGate(ref voice, interleaved, frames);
+                RenderGate(ref voice, plan.Assets, interleaved, frames);
             }
         }
 
@@ -131,6 +135,9 @@ public sealed class PlanRenderer
             PhaseDelta = voice.Kind == RenderVoiceKind.Sine && sampleRate > 0
                 ? TwoPi * voice.Frequency / sampleRate
                 : 0,
+            AssetPosition = 0,
+            AssetIndex = voice.AssetIndex,
+            Frequency = voice.Frequency,
             GainLeft = voice.GainLeft,
             GainRight = voice.GainRight,
             Kind = voice.Kind,
@@ -192,7 +199,7 @@ public sealed class PlanRenderer
         }
     }
 
-    private static void RenderGate(ref Voice voice, Span<float> interleaved, int frames)
+    private static void RenderGate(ref Voice voice, PlanAsset[] assets, Span<float> interleaved, int frames)
     {
         int i = SkipWait(ref voice, frames);
         while (i < frames && voice.Remaining > 0)
@@ -200,12 +207,26 @@ public sealed class PlanRenderer
             float envelope = voice.Remaining <= FadeTail
                 ? voice.Remaining / (float)FadeTail
                 : 1f;
-            float sample = voice.Kind == RenderVoiceKind.Sine
-                ? MathF.Sin((float)voice.Phase)
-                : 0f;
-            interleaved[2 * i] += sample * voice.GainLeft * envelope;
-            interleaved[2 * i + 1] += sample * voice.GainRight * envelope;
-            AdvancePhase(ref voice);
+            float left;
+            float right;
+            if (voice.Kind == RenderVoiceKind.Sine)
+            {
+                float s = MathF.Sin((float)voice.Phase);
+                left = s * voice.GainLeft;
+                right = s * voice.GainRight;
+                AdvancePhase(ref voice);
+            }
+            else
+            {
+                PlanAsset asset = assets[voice.AssetIndex];
+                ReadAsset(asset, ref voice, voice.GainLeft, voice.GainRight, out left, out right);
+                if (voice.AssetPosition >= asset.Frames)
+                {
+                    voice.Remaining = 1;
+                }
+            }
+            interleaved[2 * i] += left * envelope;
+            interleaved[2 * i + 1] += right * envelope;
             voice.Remaining--;
             i++;
         }
@@ -215,18 +236,27 @@ public sealed class PlanRenderer
         }
     }
 
-    private static void RenderFadeTail(ref Voice voice, Span<float> interleaved, int frames)
+    private static void RenderFadeTail(ref Voice voice, PlanAsset[] assets, Span<float> interleaved, int frames)
     {
         int i = SkipWait(ref voice, frames);
         while (i < frames && voice.StealFade > 0)
         {
             float envelope = voice.StealFade / (float)FadeTail;
-            float sample = voice.Kind == RenderVoiceKind.Sine
-                ? MathF.Sin((float)voice.Phase)
-                : 0f;
-            interleaved[2 * i] += sample * voice.GainLeft * envelope;
-            interleaved[2 * i + 1] += sample * voice.GainRight * envelope;
-            AdvancePhase(ref voice);
+            float left;
+            float right;
+            if (voice.Kind == RenderVoiceKind.Sine)
+            {
+                float s = MathF.Sin((float)voice.Phase);
+                left = s * voice.GainLeft;
+                right = s * voice.GainRight;
+                AdvancePhase(ref voice);
+            }
+            else
+            {
+                ReadAsset(assets[voice.AssetIndex], ref voice, voice.GainLeft, voice.GainRight, out left, out right);
+            }
+            interleaved[2 * i] += left * envelope;
+            interleaved[2 * i + 1] += right * envelope;
             voice.StealFade--;
             i++;
         }
@@ -234,6 +264,42 @@ public sealed class PlanRenderer
         {
             voice.Active = false;
         }
+    }
+
+    private static void ReadAsset(PlanAsset asset, ref Voice voice,
+        float gainLeft, float gainRight, out float left, out float right)
+    {
+        double position = voice.AssetPosition;
+        if (asset.Channels == 1)
+        {
+            float mono = SampleChannel(asset, position, 0);
+            left = mono * gainLeft;
+            right = mono * gainRight;
+        }
+        else
+        {
+            left = SampleChannel(asset, position, 0) * gainLeft;
+            right = SampleChannel(asset, position, 1) * gainRight;
+        }
+        voice.AssetPosition += voice.Frequency;
+    }
+
+    private static float SampleChannel(PlanAsset asset, double position, int channel)
+    {
+        if (position <= 0)
+        {
+            return asset.Samples[channel];
+        }
+        if (position >= asset.Frames - 1)
+        {
+            return asset.Samples[(asset.Frames - 1) * asset.Channels + channel];
+        }
+        long i0 = (long)position;
+        float frac = (float)(position - i0);
+        int ch = asset.Channels;
+        float s0 = asset.Samples[i0 * ch + channel];
+        float s1 = asset.Samples[(i0 + 1) * ch + channel];
+        return s0 + (s1 - s0) * frac;
     }
 
     private static int SkipWait(ref Voice voice, int frames)

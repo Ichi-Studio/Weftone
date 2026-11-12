@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Weftone.Application\Weftone.Application.csproj" />
+    <ProjectReference Include="..\..\src\Weftone.Adapters.Codecs\Weftone.Adapters.Codecs.csproj" />
   </ItemGroup>
 
 </Project>

@@ -96,14 +96,34 @@ public class DocumentCompilerTests
     }
 
     [Test]
-    public void Sampler_channel_compiles_to_sampler_kind()
+    public void Sampler_channel_compiles_with_rate_and_asset_index()
     {
         var document = NewDocument();
         document.Channels.Add(new Channel { Id = 2, Kind = ChannelKind.Sampler, AssetId = "a1" });
         document.Assets.Add(new AssetRef { Id = "a1", Path = "assets/a.wav" });
+        document.Patterns[0].Notes.Add(new Note { ChannelId = 2, Tick = 0, Key = 72, LengthTicks = 96 });
+        RenderPlan plan = new DocumentCompiler().Compile(document,
+        [
+            new PreparedAsset("a1", [0f, 0f, 0f], 1, 3),
+        ]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(plan.Voices[0].Kind, Is.EqualTo(RenderVoiceKind.Sampler));
+            Assert.That(plan.Voices[0].AssetIndex, Is.EqualTo(0));
+            Assert.That(plan.Voices[0].Frequency, Is.EqualTo(2f).Within(1e-4f), "key72 = 原速×2");
+            Assert.That(plan.Assets.Length, Is.EqualTo(1));
+            Assert.That(plan.Assets[0].Frames, Is.EqualTo(3));
+        });
+    }
+
+    [Test]
+    public void Sampler_channel_without_prepared_asset_rejects()
+    {
+        var document = NewDocument();
+        document.Channels.Add(new Channel { Id = 2, Kind = ChannelKind.Sampler, AssetId = "a1" });
         document.Patterns[0].Notes.Add(new Note { ChannelId = 2, Tick = 0, LengthTicks = 96 });
-        RenderPlan plan = new DocumentCompiler().Compile(document);
-        Assert.That(plan.Voices[0].Kind, Is.EqualTo(RenderVoiceKind.Sampler));
+        Assert.That(() => new DocumentCompiler().Compile(document),
+            Throws.InvalidOperationException.With.Message.Contains("缺少已准备的资产"));
     }
 
     [Test]

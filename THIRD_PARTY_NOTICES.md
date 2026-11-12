@@ -7,6 +7,7 @@
 | 组件 | 版本/来源 | 许可（SPDX） | 用途 | 位置 |
 |---|---|---|---|---|
 | miniaudio | master@2026-11 vendored | MIT-0（多许可可选，见其 LICENSE） | 音频设备 I/O | `native/vendor/miniaudio/` |
+| dr_wav | dr_libs master@2026-11 vendored | MIT-0（多许可可选，见其 LICENSE） | WAV 解码 | `native/vendor/dr_wav/` |
 
 M0 其余产品代码为本项目原创，GPL-3.0-or-later。
 

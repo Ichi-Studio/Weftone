@@ -430,7 +430,9 @@ FodyWeavers.xsd
 # ==================== Weftone 项目补充 ====================
 
 # native 构建
+native/build/
 native/weftone_miniaudio/build/
+native/weftone_codecs/build/
 native/clap_bridge/build/
 
 # JetBrains Rider

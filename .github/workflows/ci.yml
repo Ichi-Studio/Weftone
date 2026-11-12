@@ -20,10 +20,10 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: 构建 native shim（CMake，验证三平台可编译）
+      - name: 构建 native shims（CMake，验证三平台可编译）
         run: |
-          cmake -S native/weftone_miniaudio -B native/weftone_miniaudio/build
-          cmake --build native/weftone_miniaudio/build --config Release
+          cmake -S native -B native/build
+          cmake --build native/build --config Release
 
       - name: 构建 Release
         run: dotnet build -c Release

@@ -9,9 +9,20 @@ namespace Weftone.Application;
 /// </summary>
 public sealed class DocumentCompiler
 {
-    public RenderPlan Compile(ProjectDocument document)
+    /// <summary>仅 sine 声部的工程可不带资产编译。</summary>
+    public RenderPlan Compile(ProjectDocument document) => Compile(document, []);
+
+    /// <summary>sampler 声部需要 PreparedAsset（已解码/重采样）；AssetIndex 指向 plan.Assets。</summary>
+    public RenderPlan Compile(ProjectDocument document, IReadOnlyList<PreparedAsset> assets)
     {
+        ArgumentNullException.ThrowIfNull(assets);
         (long num, long den) = TickMath.SamplesPerTick(document.SampleRate, document.Tempo);
+
+        var assetIndexById = new Dictionary<string, int>(assets.Count);
+        for (int i = 0; i < assets.Count; i++)
+        {
+            assetIndexById[assets[i].AssetId] = i;
+        }
 
         var patternEnds = new Dictionary<int, long>(document.Patterns.Count);
         foreach (Pattern pattern in document.Patterns)
@@ -46,6 +57,16 @@ public sealed class DocumentCompiler
                 (float panLeft, float panRight) = PanLaw.Linear(channel.Pan);
                 double gain = note.Velocity * channel.Volume;
                 double frequency = 440.0 * Math.Pow(2.0, (note.Key - 69) / 12.0);
+                int assetIndex = -1;
+                if (channel.Kind == ChannelKind.Sampler)
+                {
+                    if (channel.AssetId is null || !assetIndexById.TryGetValue(channel.AssetId, out assetIndex))
+                    {
+                        throw new InvalidOperationException($"sampler channel {channel.Id} 缺少已准备的资产");
+                    }
+                    // MIDI 60 = 原速；key 偏移即播放速率
+                    frequency = Math.Pow(2.0, (note.Key - 60) / 12.0);
+                }
                 voices.Add(new RenderVoice
                 {
                     StartSample = TickMath.TicksToSamples(clip.StartTick + note.Tick, num, den),
@@ -54,12 +75,22 @@ public sealed class DocumentCompiler
                     Frequency = (float)frequency,
                     GainLeft = (float)(gain * panLeft),
                     GainRight = (float)(gain * panRight),
-                    AssetIndex = -1,
+                    AssetIndex = assetIndex,
                 });
             }
         }
 
         RenderVoice[] sorted = voices.OrderBy(v => v.StartSample).ToArray();
+        var planAssets = new PlanAsset[assets.Count];
+        for (int i = 0; i < assets.Count; i++)
+        {
+            planAssets[i] = new PlanAsset
+            {
+                Samples = assets[i].Interleaved,
+                Channels = assets[i].Channels,
+                Frames = assets[i].Frames,
+            };
+        }
         return new RenderPlan
         {
             SampleRate = document.SampleRate,
@@ -67,6 +98,7 @@ public sealed class DocumentCompiler
             MasterGain = 1f,
             TotalSamples = TickMath.TicksToSamples(totalTicks, num, den),
             Voices = sorted,
+            Assets = planAssets,
         };
     }
 }

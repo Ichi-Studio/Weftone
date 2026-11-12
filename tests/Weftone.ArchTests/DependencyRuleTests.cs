@@ -2,6 +2,7 @@ using NetArchTest.Rules;
 using NUnit.Framework;
 using Weftone.Abstractions;
 using Weftone.Adapters.Audio.Miniaudio;
+using Weftone.Adapters.Codecs;
 using Weftone.Adapters.ProjectStore;
 using Weftone.Engine;
 
@@ -53,7 +54,7 @@ public class DependencyRuleTests
         // 六边形：适配器需要领域类型实现端口（如 IProjectStore 用 ProjectDocument），
         // 故允许 → Domain；Engine/UI/用例层仍禁止。
         var result = Types.InAssemblies(
-                [typeof(MiniaudioBackend).Assembly, typeof(WeftProjectStore).Assembly])
+                [typeof(MiniaudioBackend).Assembly, typeof(WeftProjectStore).Assembly, typeof(DrWavDecoder).Assembly])
             .ShouldNot().HaveDependencyOnAny(
                 "Weftone.Application", "Weftone.Engine",
                 "Weftone.App", "Weftone.PluginHost", "Weftone.Ipc",

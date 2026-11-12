@@ -18,8 +18,8 @@ dotnet build -c Release
 dotnet test -c Release
 dotnet test -c Debug            # RT_ASSERT 分配断言
 
-cmake -S native/weftone_miniaudio -B native/weftone_miniaudio/build
-cmake --build native/weftone_miniaudio/build --config Release
+cmake -S native -B native/build
+cmake --build native/build --config Release
 
 dotnet run --project tools/HeadlessRender -c Release -- render --seconds 5 --out out.wav
 dotnet run --project tools/HeadlessRender -c Release -- play --seconds 5
