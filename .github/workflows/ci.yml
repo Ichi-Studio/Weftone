@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 构建 native shim（CMake，验证三平台可编译）
+        run: |
+          cmake -S native/weftone_miniaudio -B native/weftone_miniaudio/build
+          cmake --build native/weftone_miniaudio/build --config Release
+
+      - name: 构建 Release
+        run: dotnet build -c Release
+
+      - name: 构建 Debug（RT_ASSERT）
+        run: dotnet build -c Debug
+
+      - name: 测试 Release
+        run: dotnet test -c Release --no-build
+
+      - name: 测试 Debug（分配断言生效）
+        run: dotnet test -c Debug --no-build
+
+      - name: CLI 冒烟（headless 渲染 1s WAV）
+        run: >-
+          dotnet run --project tools/HeadlessRender -c Release --no-build --
+          render --seconds 1 --out artifacts/m0-smoke.wav
+
+      - name: 校验 WAV 尺寸
+        shell: bash
+        run: |
+          size=$(wc -c < artifacts/m0-smoke.wav)
+          expected=384044
+          if [ "$size" -ne "$expected" ]; then
+            echo "WAV 尺寸异常: $size != $expected (44 + 48000*1*2*4)"
+            exit 1
+          fi
