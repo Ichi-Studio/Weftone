@@ -24,8 +24,10 @@ Pattern → Playlist → Mixer 范式，但**代码、UI、DSP、工程格式全
 仓库当前包含：项目章程（[AGENTS.md](AGENTS.md)）、八项已定稿的
 [架构决策记录](docs/adr/)、[贡献指南](CONTRIBUTING.md)、
 GPLv3 [许可证](LICENSE)与[第三方声明](THIRD_PARTY_NOTICES.md)、
-vendored [miniaudio](https://github.com/mackron/miniaudio)。
-可运行代码自 M0 起逐步落地（见[路线图](#路线图)）。
+vendored [miniaudio](https://github.com/mackron/miniaudio)，
+以及第一条可运行竖切：Abstractions 端口 / Engine 正弦渲染与 RT 分配断言 /
+miniaudio 适配器 / `weftone` CLI（离线渲染 + 实时播放）/ 引擎与架构测试 /
+三平台 CI。验收标准见 [specs/M0_FOUNDATION.md](specs/M0_FOUNDATION.md)。
 
 ## 核心设计
 
@@ -88,6 +90,16 @@ dotnet test -c Debug            # RT_ASSERT 分配断言
 
 cmake -S native/weftone_miniaudio -B native/weftone_miniaudio/build
 cmake --build native/weftone_miniaudio/build --config Release
+```
+
+## 运行
+
+```sh
+# 离线渲染 5 秒 440Hz 正弦 WAV（不依赖 native）
+dotnet run --project tools/HeadlessRender -c Release -- render --seconds 5 --out out.wav
+
+# 实时播放（需先构建 native shim）
+dotnet run --project tools/HeadlessRender -c Release -- play --seconds 5
 ```
 
 ## 贡献
