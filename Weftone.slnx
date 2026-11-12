@@ -3,10 +3,12 @@
     <Project Path="src/Weftone.Abstractions/Weftone.Abstractions.csproj" />
     <Project Path="src/Weftone.Adapters.Audio.Miniaudio/Weftone.Adapters.Audio.Miniaudio.csproj" />
     <Project Path="src/Weftone.Adapters.ProjectStore/Weftone.Adapters.ProjectStore.csproj" />
+    <Project Path="src/Weftone.Application/Weftone.Application.csproj" />
     <Project Path="src/Weftone.Domain/Weftone.Domain.csproj" />
     <Project Path="src/Weftone.Engine/Weftone.Engine.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Weftone.Application.Tests/Weftone.Application.Tests.csproj" />
     <Project Path="tests/Weftone.ArchTests/Weftone.ArchTests.csproj" />
     <Project Path="tests/Weftone.Domain.Tests/Weftone.Domain.Tests.csproj" />
     <Project Path="tests/Weftone.Engine.Tests/Weftone.Engine.Tests.csproj" />

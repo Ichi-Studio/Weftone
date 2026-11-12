@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Weftone.Domain\Weftone.Domain.csproj" />
+    <ProjectReference Include="..\Weftone.Abstractions\Weftone.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
