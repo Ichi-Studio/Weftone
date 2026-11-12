@@ -1,0 +1,197 @@
+using System.Text.Json.Serialization;
+using Weftone.Domain;
+
+namespace Weftone.Adapters.ProjectStore;
+
+#pragma warning disable CA1812 // DTO 经反序列化实例化
+
+internal sealed class MetadataJson
+{
+    [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; }
+    [JsonPropertyName("generator")] public string Generator { get; set; } = "";
+}
+
+internal sealed class ProjectJson
+{
+    [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; }
+    [JsonPropertyName("tempo")] public int Tempo { get; set; }
+    [JsonPropertyName("sampleRate")] public int SampleRate { get; set; }
+    [JsonPropertyName("channels")] public List<ChannelJson> Channels { get; set; } = [];
+    [JsonPropertyName("patterns")] public List<PatternJson> Patterns { get; set; } = [];
+    [JsonPropertyName("playlist")] public List<ClipJson> Playlist { get; set; } = [];
+    [JsonPropertyName("assets")] public List<AssetJson> Assets { get; set; } = [];
+}
+
+internal sealed class ChannelJson
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "";
+    [JsonPropertyName("volume")] public double Volume { get; set; }
+    [JsonPropertyName("pan")] public double Pan { get; set; }
+    [JsonPropertyName("assetId")] public string? AssetId { get; set; }
+}
+
+internal sealed class NoteJson
+{
+    [JsonPropertyName("channelId")] public int ChannelId { get; set; }
+    [JsonPropertyName("tick")] public long Tick { get; set; }
+    [JsonPropertyName("key")] public int Key { get; set; }
+    [JsonPropertyName("velocity")] public double Velocity { get; set; }
+    [JsonPropertyName("lengthTicks")] public long LengthTicks { get; set; }
+}
+
+internal sealed class PatternJson
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("notes")] public List<NoteJson> Notes { get; set; } = [];
+}
+
+internal sealed class ClipJson
+{
+    [JsonPropertyName("patternId")] public int PatternId { get; set; }
+    [JsonPropertyName("startTick")] public long StartTick { get; set; }
+}
+
+internal sealed class AssetJson
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("path")] public string Path { get; set; } = "";
+    [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
+}
+
+#pragma warning restore CA1812
+
+internal static class SchemaMapper
+{
+    public static ProjectJson ToJson(ProjectDocument document)
+    {
+        return new ProjectJson
+        {
+            SchemaVersion = WeftProjectStore.SchemaVersion,
+            Tempo = document.Tempo,
+            SampleRate = document.SampleRate,
+            Channels = document.Channels.Select(c => new ChannelJson
+            {
+                Id = c.Id, Name = c.Name, Kind = KindToString(c.Kind),
+                Volume = c.Volume, Pan = c.Pan, AssetId = c.AssetId,
+            }).ToList(),
+            Patterns = document.Patterns.Select(p => new PatternJson
+            {
+                Id = p.Id, Name = p.Name,
+                Notes = p.Notes.Select(n => new NoteJson
+                {
+                    ChannelId = n.ChannelId, Tick = n.Tick, Key = n.Key,
+                    Velocity = n.Velocity, LengthTicks = n.LengthTicks,
+                }).ToList(),
+            }).ToList(),
+            Playlist = document.Playlist.Select(c => new ClipJson
+            {
+                PatternId = c.PatternId, StartTick = c.StartTick,
+            }).ToList(),
+            Assets = document.Assets.Select(a => new AssetJson
+            {
+                Id = a.Id, Path = a.Path, Sha256 = a.Sha256,
+            }).ToList(),
+        };
+    }
+
+    public static ProjectDocument ToDomain(ProjectJson json)
+    {
+        var document = new ProjectDocument { Tempo = json.Tempo, SampleRate = json.SampleRate };
+        var channelIds = new HashSet<int>();
+        foreach (ChannelJson c in json.Channels)
+        {
+            Require(channelIds.Add(c.Id), $"channel id {c.Id} 重复");
+            document.Channels.Add(new Channel
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Kind = ParseKind(c.Kind),
+                Volume = c.Volume,
+                Pan = c.Pan,
+                AssetId = c.AssetId,
+            });
+        }
+
+        foreach (AssetJson a in json.Assets)
+        {
+            Require(!string.IsNullOrWhiteSpace(a.Id), "asset id 为空");
+            Require(a.Path.StartsWith("assets/", StringComparison.Ordinal), $"asset 路径越界: {a.Path}");
+            Require(IsHex64(a.Sha256), $"asset sha256 非法: {a.Sha256}");
+            document.Assets.Add(new AssetRef { Id = a.Id, Path = a.Path, Sha256 = a.Sha256 });
+        }
+
+        foreach (ChannelJson c in json.Channels)
+        {
+            if (ParseKind(c.Kind) == ChannelKind.Sampler)
+            {
+                Require(!string.IsNullOrEmpty(c.AssetId), $"sampler channel {c.Id} 缺少 assetId");
+                Require(document.Assets.Any(a => a.Id == c.AssetId),
+                    $"channel {c.Id} 引用未知 asset {c.AssetId}");
+            }
+            Require(c.Volume is >= 0 and <= 2, $"channel {c.Id} 音量越界: {c.Volume}");
+            Require(c.Pan is >= -1 and <= 1, $"channel {c.Id} 声像越界: {c.Pan}");
+        }
+
+        var patternIds = new HashSet<int>();
+        foreach (PatternJson p in json.Patterns)
+        {
+            Require(patternIds.Add(p.Id), $"pattern id {p.Id} 重复");
+            var pattern = new Pattern { Id = p.Id, Name = p.Name };
+            foreach (NoteJson n in p.Notes)
+            {
+                Require(n.Tick >= 0, $"tick 越界: {n.Tick}");
+                Require(n.LengthTicks >= 1, $"lengthTicks 越界: {n.LengthTicks}");
+                Require(n.Key is >= 0 and <= 127, $"key 越界: {n.Key}");
+                Require(n.Velocity is >= 0 and <= 1, $"velocity 越界: {n.Velocity}");
+                Require(channelIds.Contains(n.ChannelId), $"note 引用未知 channel {n.ChannelId}");
+                pattern.Notes.Add(new Note
+                {
+                    ChannelId = n.ChannelId, Tick = n.Tick, Key = n.Key,
+                    Velocity = n.Velocity, LengthTicks = n.LengthTicks,
+                });
+            }
+            document.Patterns.Add(pattern);
+        }
+
+        foreach (ClipJson c in json.Playlist)
+        {
+            Require(patternIds.Contains(c.PatternId), $"clip 引用未知 pattern {c.PatternId}");
+            Require(c.StartTick >= 0, $"clip startTick 越界: {c.StartTick}");
+            document.Playlist.Add(new Clip { PatternId = c.PatternId, StartTick = c.StartTick });
+        }
+
+        Require(document.Tempo is >= ProjectDocument.MinTempo and <= ProjectDocument.MaxTempo,
+            $"BPM 越界: {document.Tempo}");
+        Require(document.SampleRate is >= 8000 and <= 192_000,
+            $"采样率越界: {document.SampleRate}");
+        return document;
+    }
+
+    private static string KindToString(ChannelKind kind) => kind switch
+    {
+        ChannelKind.Sine => "sine",
+        ChannelKind.Sampler => "sampler",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    private static ChannelKind ParseKind(string kind) => kind switch
+    {
+        "sine" => ChannelKind.Sine,
+        "sampler" => ChannelKind.Sampler,
+        _ => throw new InvalidProjectException($"未知声部类型: {kind}"),
+    };
+
+    private static bool IsHex64(string value)
+        => value.Length == 64 && value.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'));
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidProjectException(message);
+        }
+    }
+}

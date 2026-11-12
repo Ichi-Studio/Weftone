@@ -1,0 +1,173 @@
+using System.IO.Compression;
+using System.Text;
+using NUnit.Framework;
+using Weftone.Adapters.ProjectStore;
+using Weftone.Domain;
+
+namespace Weftone.Domain.Tests;
+
+public class WeftProjectStoreTests
+{
+    private string _workDir = "";
+
+    [SetUp]
+    public void SetUp()
+    {
+        _workDir = Path.Combine(Path.GetTempPath(), "weftone-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_workDir);
+    }
+
+    [TearDown]
+    public void TearDown() => Directory.Delete(_workDir, recursive: true);
+
+    private static ProjectDocument NewDocument()
+    {
+        var document = new ProjectDocument { Tempo = 128, SampleRate = 48_000 };
+        document.Channels.Add(new Channel
+        {
+            Id = 1, Name = "Kick", Kind = ChannelKind.Sampler, AssetId = "asset-kick", Volume = 0.9, Pan = -0.1,
+        });
+        document.Channels.Add(new Channel { Id = 2, Name = "Lead", Kind = ChannelKind.Sine });
+        var pattern = new Pattern { Id = 10, Name = "P1" };
+        pattern.Notes.Add(new Note { ChannelId = 1, Tick = 0, Key = 60, Velocity = 0.9, LengthTicks = 48 });
+        pattern.Notes.Add(new Note { ChannelId = 2, Tick = 96, Key = 69, Velocity = 0.8, LengthTicks = 192 });
+        document.Patterns.Add(pattern);
+        document.Playlist.Add(new Clip { PatternId = 10, StartTick = 0 });
+        document.Assets.Add(new AssetRef { Id = "asset-kick", Path = "assets/kick.wav" });
+        return document;
+    }
+
+    private string WriteAsset()
+    {
+        string path = Path.Combine(_workDir, "kick.wav");
+        File.WriteAllBytes(path, Encoding.ASCII.GetBytes("fake-wav-payload-0123456789"));
+        return path;
+    }
+
+    [Test]
+    public void Save_load_roundtrip_is_equivalent()
+    {
+        var store = new WeftProjectStore();
+        var document = NewDocument();
+        string asset = WriteAsset();
+        string package = Path.Combine(_workDir, "a.weft");
+        store.Save(package, document, new Dictionary<string, string> { ["assets/kick.wav"] = asset });
+
+        LoadedProject loaded = store.Load(package);
+        ProjectDocument doc = loaded.Document;
+        Assert.Multiple(() =>
+        {
+            Assert.That(doc.Tempo, Is.EqualTo(128));
+            Assert.That(doc.SampleRate, Is.EqualTo(48_000));
+            Assert.That(doc.Channels.Count, Is.EqualTo(2));
+            Assert.That(doc.Channels[0].Kind, Is.EqualTo(ChannelKind.Sampler));
+            Assert.That(doc.Channels[0].Volume, Is.EqualTo(0.9));
+            Assert.That(doc.Channels[0].Pan, Is.EqualTo(-0.1));
+            Assert.That(doc.Channels[0].AssetId, Is.EqualTo("asset-kick"));
+            Assert.That(doc.Patterns[0].Notes.Count, Is.EqualTo(2));
+            Assert.That(doc.Patterns[0].Notes[1].Tick, Is.EqualTo(96));
+            Assert.That(doc.Playlist.Count, Is.EqualTo(1));
+        });
+        Assert.That(doc.Assets[0].Sha256, Has.Length.EqualTo(64));
+
+        using var stream = loaded.OpenAsset(doc.Assets[0]);
+        using var reader = new StreamReader(stream);
+        Assert.That(reader.ReadToEnd(), Is.EqualTo("fake-wav-payload-0123456789"));
+    }
+
+    [Test]
+    public void Load_rejects_zip_slip()
+    {
+        string package = Path.Combine(_workDir, "evil.weft");
+        using (var zip = ZipFile.Open(package, ZipArchiveMode.Create))
+        {
+            ZipArchiveEntry entry = zip.CreateEntry("../evil.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("boom");
+        }
+        Assert.That(() => new WeftProjectStore().Load(package),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains("非法 zip 条目"));
+    }
+
+    [Test]
+    public void Load_rejects_wrong_schema_version()
+    {
+        string package = Path.Combine(_workDir, "v2.weft");
+        using (var zip = ZipFile.Open(package, ZipArchiveMode.Create))
+        {
+            Write(zip, "metadata.json", """{"schemaVersion":2,"generator":"x"}""");
+            Write(zip, "project.json", """{"schemaVersion":2}""");
+        }
+        Assert.That(() => new WeftProjectStore().Load(package),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains("schema 版本不支持"));
+    }
+
+    [Test]
+    public void Load_rejects_missing_project_json()
+    {
+        string package = Path.Combine(_workDir, "nojson.weft");
+        using (var zip = ZipFile.Open(package, ZipArchiveMode.Create))
+        {
+            Write(zip, "metadata.json", """{"schemaVersion":1,"generator":"x"}""");
+        }
+        Assert.That(() => new WeftProjectStore().Load(package),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains("project.json"));
+    }
+
+    [Test]
+    public void Load_rejects_tampered_asset()
+    {
+        var store = new WeftProjectStore();
+        string asset = WriteAsset();
+        string package = Path.Combine(_workDir, "tampered.weft");
+        store.Save(package, NewDocument(), new Dictionary<string, string> { ["assets/kick.wav"] = asset });
+
+        string tampered = Path.Combine(_workDir, "tampered2.weft");
+        using (var source = ZipFile.OpenRead(package))
+        using (var target = ZipFile.Open(tampered, ZipArchiveMode.Create))
+        {
+            foreach (ZipArchiveEntry entry in source.Entries)
+            {
+                ZipArchiveEntry clone = target.CreateEntry(entry.FullName);
+                using Stream input = entry.Open();
+                using Stream output = clone.Open();
+                if (entry.FullName == "assets/kick.wav")
+                {
+                    byte[] evil = Encoding.ASCII.GetBytes("tampered!!");
+                    output.Write(evil);
+                }
+                else
+                {
+                    input.CopyTo(output);
+                }
+            }
+        }
+        Assert.That(() => store.Load(tampered),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains("SHA256 不匹配"));
+    }
+
+    [Test]
+    public void Load_rejects_note_referencing_unknown_channel()
+    {
+        string package = Path.Combine(_workDir, "badref.weft");
+        using (var zip = ZipFile.Open(package, ZipArchiveMode.Create))
+        {
+            Write(zip, "metadata.json", """{"schemaVersion":1,"generator":"x"}""");
+            Write(zip, "project.json", """
+                {"schemaVersion":1,"tempo":140,"sampleRate":48000,
+                 "channels":[{"id":1,"name":"S","kind":"sine","volume":1.0,"pan":0.0}],
+                 "patterns":[{"id":10,"name":"P","notes":[{"channelId":99,"tick":0,"key":60,"velocity":1.0,"lengthTicks":96}]}],
+                 "playlist":[],"assets":[]}
+                """);
+        }
+        Assert.That(() => new WeftProjectStore().Load(package),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains("未知 channel"));
+    }
+
+    private static void Write(ZipArchive zip, string name, string content)
+    {
+        ZipArchiveEntry entry = zip.CreateEntry(name);
+        using var writer = new StreamWriter(entry.Open());
+        writer.Write(content);
+    }
+}
