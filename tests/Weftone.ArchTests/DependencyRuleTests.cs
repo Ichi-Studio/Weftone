@@ -63,4 +63,17 @@ public class DependencyRuleTests
         Assert.That(result.IsSuccessful, Is.True,
             "Adapters 违规依赖:\n" + string.Join("\n", result.FailingTypeNames ?? []));
     }
+
+    [Test]
+    public void Domain_depends_on_nothing_external()
+    {
+        var result = Types.InAssembly(typeof(Weftone.Domain.ProjectDocument).Assembly)
+            .ShouldNot().HaveDependencyOnAny(
+                "Weftone.Application", "Weftone.Engine", "Weftone.Adapters",
+                "Weftone.App", "Weftone.PluginHost", "Weftone.Ipc",
+                "Avalonia", "SkiaSharp")
+            .GetResult();
+        Assert.That(result.IsSuccessful, Is.True,
+            "Domain 违规依赖:\n" + string.Join("\n", result.FailingTypeNames ?? []));
+    }
 }

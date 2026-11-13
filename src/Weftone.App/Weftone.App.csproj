@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>Weftone.App</RootNamespace>
+    <AssemblyName>Weftone.App</AssemblyName>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Weftone.Application\Weftone.Application.csproj" />
+    <ProjectReference Include="..\Weftone.Engine\Weftone.Engine.csproj" />
+    <ProjectReference Include="..\Weftone.Adapters.Audio.Miniaudio\Weftone.Adapters.Audio.Miniaudio.csproj" />
+    <ProjectReference Include="..\Weftone.Adapters.Codecs\Weftone.Adapters.Codecs.csproj" />
+    <ProjectReference Include="..\Weftone.Adapters.ProjectStore\Weftone.Adapters.ProjectStore.csproj" />
+  </ItemGroup>
+
+</Project>

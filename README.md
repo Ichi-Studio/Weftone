@@ -7,7 +7,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10%20LTS-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
-[![Status](https://img.shields.io/badge/status-M0%20pre--alpha-orange.svg)](#路线图)
+[![Status](https://img.shields.io/badge/status-M1b%20pre--alpha-orange.svg)](#路线图)
 
 ## 这是什么
 
@@ -19,15 +19,21 @@ Pattern → Playlist → Mixer 范式，但**代码、UI、DSP、工程格式全
 - 不复制任何专有资产，不复刻 FL Studio 内部架构；
 - 不使用 FL / Fruity / Image-Line 的命名或视觉资产。
 
-## 当前状态：M0（地基阶段）
+## 当前状态：M1b（最小 UI 阶段）
 
-仓库当前包含：项目章程（[AGENTS.md](AGENTS.md)）、八项已定稿的
+M0（地基）与 M1a（headless 竖切）已完成：`.weft` 工程可确定性渲染出 WAV，
+含文档模型、命令撤销、编译器、transport、Sampler 声部、Mixer 与黄金音频回归。
+当前推进 M1b 最小 UI（[specs/M1b_UI.md](specs/M1b_UI.md)）：
+
+- **竖切 1（已完成）**：Avalonia App 骨架、传输条（播放/停止/位置/BPM/撤销重做）、
+  工程存取（演示工程/打开/保存）、实时播放接线（miniaudio + 停止-交换-恢复）。
+- 竖切 2~4（进行中）：Piano Roll 自绘、Playlist 自绘、Mixer、采样导入与导出。
+
+仓库另含：项目章程（[AGENTS.md](AGENTS.md)）、八项已定稿的
 [架构决策记录](docs/adr/)、[贡献指南](CONTRIBUTING.md)、
 GPLv3 [许可证](LICENSE)与[第三方声明](THIRD_PARTY_NOTICES.md)、
-vendored [miniaudio](https://github.com/mackron/miniaudio)，
-以及第一条可运行竖切：Abstractions 端口 / Engine 正弦渲染与 RT 分配断言 /
-miniaudio 适配器 / `weftone` CLI（离线渲染 + 实时播放）/ 引擎与架构测试 /
-三平台 CI。验收标准见 [specs/M0_FOUNDATION.md](specs/M0_FOUNDATION.md)。
+vendored [miniaudio](https://github.com/mackron/miniaudio) 与 dr_wav、
+`weftone` CLI（离线渲染 + 实时播放）、引擎/架构/应用/UI 测试与三平台 CI。
 
 ## 核心设计
 
@@ -76,9 +82,9 @@ ProjectDocument（可编辑 / 可撤销 / 富对象）
 
 | 里程碑 | 内容 |
 |---|---|
-| **M0**（进行中） | 仓库 / CI / 架构测试 / miniaudio shim / 正弦出声 / RT 断言 / 渲染 CLI |
-| M1a | headless 竖切：文档模型、`.weft` 存取、命令撤销、编译器、transport、Sampler、Mixer、导出 |
-| M1b | 最小 UI：Piano Roll / Playlist / Mixer / 传输条 / 工程存取 |
+| **M0**（已完成） | 仓库 / CI / 架构测试 / miniaudio shim / 正弦出声 / RT 断言 / 渲染 CLI |
+| **M1a**（已完成） | headless 竖切：文档模型、`.weft` 存取、命令撤销、编译器、transport、Sampler、Mixer、导出 |
+| **M1b**（进行中） | 最小 UI：Piano Roll / Playlist / Mixer / 传输条 / 工程存取 |
 | M2+ | 自动化曲线、CLAP 宿主、拉伸 / 切片、进程隔离、性能打磨 |
 
 ## 构建
@@ -100,6 +106,9 @@ dotnet run --project tools/HeadlessRender -c Release -- render --seconds 5 --out
 
 # 实时播放（需先构建 native shim）
 dotnet run --project tools/HeadlessRender -c Release -- play --seconds 5
+
+# 图形界面（M1b，需先构建 native shim；启动后加载演示工程，点播放出声）
+dotnet run --project src/Weftone.App -c Release
 ```
 
 ## 贡献

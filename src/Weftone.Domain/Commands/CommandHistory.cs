@@ -38,4 +38,11 @@ public sealed class CommandHistory
         command.Apply(document);
         _undo.Push(command);
     }
+
+    /// <summary>载入新工程时清空撤销/重做栈。</summary>
+    public void Clear()
+    {
+        _undo.Clear();
+        _redo.Clear();
+    }
 }

@@ -5,7 +5,7 @@ namespace Weftone.Adapters.Audio.Miniaudio;
 
 /// <summary>
 /// 解析 weftone_miniaudio 库路径：环境变量 WEFTONE_NATIVE_DIR → 应用目录 →
-/// 仓库布局 native/weftone_miniaudio/build（向上回溯查找）。
+/// 仓库布局 native/build 或 native/weftone_miniaudio/build（向上回溯）。
 /// </summary>
 internal static class NativeProbe
 {
@@ -53,14 +53,17 @@ internal static class NativeProbe
 
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            string buildDir = Path.Combine(dir.FullName, "native", "weftone_miniaudio", "build");
-            if (!Directory.Exists(buildDir))
+            foreach (string sub in (string[])["native/build", "native/weftone_miniaudio/build"])
             {
-                continue;
-            }
-            foreach (string file in Directory.EnumerateFiles(buildDir, fileName, SearchOption.AllDirectories))
-            {
-                yield return file;
+                string buildDir = Path.Combine(dir.FullName, sub);
+                if (!Directory.Exists(buildDir))
+                {
+                    continue;
+                }
+                foreach (string file in Directory.EnumerateFiles(buildDir, fileName, SearchOption.AllDirectories))
+                {
+                    yield return file;
+                }
             }
         }
     }
