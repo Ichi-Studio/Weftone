@@ -144,4 +144,31 @@ public class PlaybackServiceTests
             Assert.That(backend.DisposeCount, Is.EqualTo(1));
         });
     }
+
+    [Test]
+    public void Play_sets_IsLooping_from_plan()
+    {
+        var backends = new List<FakeBackend>();
+        using var playback = new PlaybackService(
+            () =>
+            {
+                var backend = new FakeBackend();
+                backends.Add(backend);
+                return backend;
+            },
+            new FakeRenderer());
+        playback.Play(Plan());
+        Assert.That(playback.IsLooping, Is.False, "Song 计划无循环区间");
+        playback.Play(new RenderPlan
+        {
+            SampleRate = 48_000,
+            Channels = 2,
+            TotalSamples = 4_800,
+            LoopStartSample = 0,
+            LoopEndSample = 4_800,
+            Voices = [],
+        });
+        Assert.That(playback.IsLooping, Is.True, "Pattern 计划带循环区间");
+        Assert.That(backends.Count, Is.EqualTo(1), "同采样率重播复用后端");
+    }
 }

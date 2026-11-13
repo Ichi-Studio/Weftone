@@ -86,9 +86,27 @@ public sealed class EditSession : IDisposable
 
     public RenderPlan Compile() => new DocumentCompiler().Compile(Document, _prepared);
 
+    /// <summary>Pattern 模式编译：单个 Pattern + 循环区间（M1b）。</summary>
+    public RenderPlan CompilePattern(int patternId) =>
+        new DocumentCompiler().CompilePattern(Document, patternId, _prepared);
+
     public void Execute(ICommand command)
     {
         History.Execute(command, Document);
+        IsDirty = true;
+    }
+
+    /// <summary>开启拖拽事务：手势内的多条命令合并为单条撤销记录。</summary>
+    public void BeginTransaction(string title)
+    {
+        History.BeginTransaction(title);
+        IsDirty = true;
+    }
+
+    /// <summary>结束事务并入栈；空事务不入栈。</summary>
+    public void EndTransaction()
+    {
+        History.EndTransaction();
         IsDirty = true;
     }
 

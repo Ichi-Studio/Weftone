@@ -33,6 +33,9 @@ public sealed class RenderPlan
     public required int Channels { get; init; }
     public float MasterGain { get; init; } = 1f;
     public required long TotalSamples { get; init; }
+    /// <summary>循环区间（Pattern 模式）：LoopEnd &gt; LoopStart 时启用，position 到 LoopEnd 回绕 LoopStart。</summary>
+    public long LoopStartSample { get; init; }
+    public long LoopEndSample { get; init; }
     public required RenderVoice[] Voices { get; init; }
     public PlanAsset[] Assets { get; init; } = [];
 }

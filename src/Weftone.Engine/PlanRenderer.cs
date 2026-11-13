@@ -38,6 +38,8 @@ public sealed class PlanRenderer : IPlanRenderer
     private RenderPlan? _plan;
     private int _nextEvent;
     private long _position;
+    private long _loopStart;
+    private long _loopEnd;
 
     public long Position => _position;
 
@@ -50,6 +52,8 @@ public sealed class PlanRenderer : IPlanRenderer
         _nextEvent = 0;
         _pendingHead = 0;
         _pendingCount = 0;
+        _loopStart = plan.LoopStartSample;
+        _loopEnd = plan.LoopEndSample;
         DroppedEvents = 0;
         Array.Clear(_pool);
     }
@@ -67,6 +71,42 @@ public sealed class PlanRenderer : IPlanRenderer
         {
             return;
         }
+        int rendered = 0;
+        while (rendered < frames)
+        {
+            long segment = frames - rendered;
+            if (_loopEnd > _loopStart)
+            {
+                long tillEnd = _loopEnd - _position;
+                if (tillEnd <= 0)
+                {
+                    // 回绕：位置回 loopStart，事件游标归零重触发；活跃声部自然延续尾音
+                    _position = _loopStart;
+                    _nextEvent = 0;
+                    tillEnd = _loopEnd - _position;
+                }
+                if (tillEnd > 0 && tillEnd < segment)
+                {
+                    segment = tillEnd;
+                }
+            }
+            RenderSegment(plan, interleaved, rendered, (int)segment);
+            rendered += (int)segment;
+        }
+
+        if (plan.MasterGain != 1f)
+        {
+            float master = plan.MasterGain;
+            for (int i = 0; i < interleaved.Length; i++)
+            {
+                interleaved[i] *= master;
+            }
+        }
+    }
+
+    private void RenderSegment(RenderPlan plan, Span<float> interleaved, int offsetFrames, int frames)
+    {
+        Span<float> slice = interleaved.Slice(offsetFrames * 2, frames * 2);
         long end = _position + frames;
 
         while (_nextEvent < plan.Voices.Length && plan.Voices[_nextEvent].StartSample < end)
@@ -84,24 +124,15 @@ public sealed class PlanRenderer : IPlanRenderer
             }
             if (voice.StealFade > 0)
             {
-                RenderFadeTail(ref voice, plan.Assets, interleaved, frames);
+                RenderFadeTail(ref voice, plan.Assets, slice, frames);
             }
             else
             {
-                RenderGate(ref voice, plan.Assets, interleaved, frames);
+                RenderGate(ref voice, plan.Assets, slice, frames);
             }
         }
 
         FillSlotsFromPending(plan.SampleRate);
-
-        if (plan.MasterGain != 1f)
-        {
-            float master = plan.MasterGain;
-            for (int i = 0; i < interleaved.Length; i++)
-            {
-                interleaved[i] *= master;
-            }
-        }
         _position = end;
     }
 

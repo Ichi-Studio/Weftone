@@ -25,10 +25,19 @@ public class MainWindowViewModelTests
     public void Play_then_stop_toggles_is_playing()
     {
         using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        session.Document.Channels.Add(new Domain.Channel { Id = 1, Name = "Sine", Kind = Domain.ChannelKind.Sine });
+        session.Document.Patterns.Add(new Domain.Pattern { Id = 10, Name = "P1" });
         using var playback = new PlaybackService(() => new FakeBackend(), new PlanRenderer());
-        var vm = new MainWindowViewModel(session, playback, new FakeDialogs());
+        var vm = new MainWindowViewModel(session, playback, new FakeDialogs())
+        {
+            SelectedPattern = session.Document.Patterns[0],
+        };
         vm.PlayCommand.Execute(null);
-        Assert.That(vm.IsPlaying, Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(vm.IsPlaying, Is.True);
+            Assert.That(playback.IsLooping, Is.True, "Pattern 模式循环");
+        });
         vm.StopCommand.Execute(null);
         Assert.That(vm.IsPlaying, Is.False);
     }

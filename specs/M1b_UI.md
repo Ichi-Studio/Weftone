@@ -52,7 +52,8 @@ Weftone.Adapters.Audio.Miniaudio（IAudioBackend，实时出声）
   - **Pattern 模式**：循环当前 Pattern（loop 区间 = pattern 长度），边画边听。
   - **Song 模式**：播放 Playlist 展开的线性时间轴（M1a 编译器已支持），到末尾停止。
 - PlanRenderer 新增 loop 支持：position 到 loopEnd 时回绕 loopStart 并重置事件游标；
-  回绕零分配。新增 `SetLoop(startSample, endSample)` / 播放/停止/定位接口（经 IPlanRenderer 扩展或新端口）。
+  回绕零分配。实现取「loop 区间随 RenderPlan 字段下发」（`LoopStartSample/LoopEndSample`），
+  Pattern/Song 模式切换经重编译 + 停止-交换-恢复交付，不新增 SetLoop 端口方法。
 - 播放/停止/循环状态机放 Application 层 PlaybackService，ViewModel 只发意图。
 
 ## RenderPlan 交换（D2）

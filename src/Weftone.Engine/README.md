@@ -2,6 +2,11 @@
 
 实时渲染层，仅依赖 Weftone.Abstractions（ADR-0002/0003）。
 
+- `PlanRenderer`：RenderPlan 离线/实时两用渲染器。64 复音预分配池，
+  池满偷最早结束者（线性淡出防 click），pending 环等位；Sine 双精度相位、
+  Sampler 资产线性插值（MIDI 60=原速）。**循环回绕（M1b）**：plan 带
+  `LoopStartSample/LoopEndSample` 时 position 到 loopEnd 回 loopStart、
+  事件游标归零重触发，活跃声部自然延续尾音；单块内多次回绕安全，全程零分配。
 - `SineEngine`：M0 正弦声部。双精度相位累积、零分配；`Callback` 预捕获委托，
   防止音频路径方法组转换分配。
 - `RtAssert`：分配断言（AGENTS.md §9）。仅 RT_ASSERT 构建生效，违规只计数

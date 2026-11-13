@@ -32,6 +32,9 @@ public sealed class PlaybackService : IDisposable
 
     public bool IsPlaying => _playing;
 
+    /// <summary>当前 plan 是否带循环区间（Pattern 模式）。</summary>
+    public bool IsLooping { get; private set; }
+
     public long Position => _renderer.Position;
 
     public long TotalSamples => _totalSamples;
@@ -42,6 +45,7 @@ public sealed class PlaybackService : IDisposable
         Stop();
         _renderer.Load(plan);
         _totalSamples = plan.TotalSamples;
+        IsLooping = plan.LoopEndSample > plan.LoopStartSample;
         EnsureOpen(plan.SampleRate, plan.Channels);
         _backend!.Start();
         _playing = true;
@@ -64,6 +68,7 @@ public sealed class PlaybackService : IDisposable
         Stop();
         _renderer.Load(plan);
         _totalSamples = plan.TotalSamples;
+        IsLooping = plan.LoopEndSample > plan.LoopStartSample;
         if (wasPlaying)
         {
             EnsureOpen(plan.SampleRate, plan.Channels);

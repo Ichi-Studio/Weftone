@@ -1,6 +1,8 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Weftone.App.ViewModels"
+        xmlns:controls="using:Weftone.App.Controls"
+        xmlns:domain="using:Weftone.Domain"
         x:Class="Weftone.App.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -20,6 +22,15 @@
         <Button x:Name="PlayButton" Content="播放" Command="{Binding PlayCommand}" />
         <Button x:Name="StopButton" Content="停止" Command="{Binding StopCommand}" />
         <Separator />
+        <TextBlock Text="Pattern" VerticalAlignment="Center" />
+        <ComboBox ItemsSource="{Binding Patterns}" SelectedItem="{Binding SelectedPattern}" Width="110">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="domain:Pattern">
+              <TextBlock Text="{Binding Name}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Separator />
         <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" Width="90" />
         <TextBlock Text="BPM" VerticalAlignment="Center" />
         <TextBlock Text="{Binding Tempo}" VerticalAlignment="Center" Width="40" />
@@ -33,10 +44,15 @@
       <TextBlock Text="{Binding StatusText}" />
     </Border>
 
-    <Border Background="#181818">
-      <TextBlock Text="Piano Roll / Playlist / Mixer — 后续竖切接入"
-                 HorizontalAlignment="Center" VerticalAlignment="Center"
-                 Foreground="#606060" />
-    </Border>
+    <Grid ColumnDefinitions="72,*" Background="#181818">
+      <controls:PianoKeysControl x:Name="Keys" />
+      <ScrollViewer Grid.Column="1" x:Name="RollScroll"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto">
+        <controls:PianoRollControl x:Name="Roll"
+                                   Pattern="{Binding SelectedPattern}"
+                                   ViewModel="{Binding}" />
+      </ScrollViewer>
+    </Grid>
   </DockPanel>
 </Window>
