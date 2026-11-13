@@ -29,6 +29,9 @@ public partial class MainWindowViewModel : ObservableObject
     private long _gestureFromTick;
     private long _gestureFromLength;
     private int _gestureFromKey;
+    private bool _clipGesture;
+    private long _clipFromTick;
+    private int _clipFromPatternId;
 
     [ObservableProperty]
     private string _title = "Weftone";
@@ -48,10 +51,21 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private Pattern? _selectedPattern;
 
+    [ObservableProperty]
+    private bool _isSongMode;
+
     /// <summary>最近一次 BeginAddNote 创建的音符（控件手势回引用）。</summary>
     public Note? LastAddedNote { get; private set; }
 
+    /// <summary>最近一次 AddClipAt 创建的 clip（控件手势回引用）。</summary>
+    public Clip? LastAddedClip { get; private set; }
+
+    /// <summary>文档被编辑/替换（含撤销重做）后通知自绘控件重画。</summary>
+    public event Action? DocumentEdited;
+
     public IReadOnlyList<Pattern> Patterns => _session.Document.Patterns;
+
+    public IReadOnlyList<Clip> PlaylistClips => _session.Document.Playlist;
 
     public MainWindowViewModel(EditSession session, PlaybackService playback, IFileDialogService dialogs)
     {
@@ -72,6 +86,13 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void Play()
     {
+        if (IsSongMode)
+        {
+            _playback.Play(_session.Compile());
+            IsPlaying = true;
+            StatusText = "Song 播放中";
+            return;
+        }
         if (SelectedPattern is null)
         {
             StatusText = "没有可播放的 Pattern";
@@ -118,8 +139,10 @@ public partial class MainWindowViewModel : ObservableObject
         Tempo = _session.Document.Tempo;
         SelectedPattern = Patterns.FirstOrDefault();
         OnPropertyChanged(nameof(Patterns));
+        OnPropertyChanged(nameof(PlaylistClips));
         RefreshTitle();
         NotifyHistoryChanged();
+        DocumentEdited?.Invoke();
     }
 
     partial void OnSelectedPatternChanged(Pattern? value)
@@ -130,8 +153,23 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private RenderPlan CompileCurrent() =>
-        SelectedPattern is null ? _session.Compile() : _session.CompilePattern(SelectedPattern.Id);
+    partial void OnIsSongModeChanged(bool value)
+    {
+        if (_playback.IsPlaying)
+        {
+            _playback.UpdatePlan(CompileCurrent());
+            StatusText = value ? "Song 播放中" : "Pattern 循环播放中";
+        }
+    }
+
+    private RenderPlan CompileCurrent()
+    {
+        if (IsSongMode || SelectedPattern is null)
+        {
+            return _session.Compile();
+        }
+        return _session.CompilePattern(SelectedPattern.Id);
+    }
 
     [RelayCommand]
     private async Task SaveAsync()
@@ -285,10 +323,55 @@ public partial class MainWindowViewModel : ObservableObject
         return $"{minutes}:{rest.ToString("00.000", CultureInfo.InvariantCulture)}";
     }
 
+    /// <summary>Playlist clip 手势：放置/删除即时；拖拽经事务合并为单条撤销。</summary>
+    public void AddClipAt(Pattern pattern, long tick)
+    {
+        var clip = new Clip { PatternId = pattern.Id, StartTick = Math.Max(0, tick) };
+        _session.Execute(new AddClipCommand(clip));
+        LastAddedClip = clip;
+        AfterEdit();
+    }
+
+    public void RemoveClip(Clip clip)
+    {
+        _session.Execute(new RemoveClipCommand(clip));
+        AfterEdit();
+    }
+
+    public void BeginMoveClip(Clip clip)
+    {
+        _session.BeginTransaction("移动 clip");
+        _clipGesture = true;
+        _clipFromTick = clip.StartTick;
+        _clipFromPatternId = clip.PatternId;
+    }
+
+    public void DragClip(Clip clip, long toTick, Pattern toPattern)
+    {
+        if (!_clipGesture)
+        {
+            return;
+        }
+        _session.Execute(new MoveClipCommand(
+            clip, _clipFromTick, _clipFromPatternId, Math.Max(0, toTick), toPattern.Id));
+    }
+
+    public void EndClipGesture()
+    {
+        if (!_clipGesture)
+        {
+            return;
+        }
+        _clipGesture = false;
+        _session.EndTransaction();
+        AfterEdit();
+    }
+
     private void AfterEdit()
     {
         RefreshTitle();
         NotifyHistoryChanged();
+        DocumentEdited?.Invoke();
         if (_playback.IsPlaying)
         {
             _playback.UpdatePlan(CompileCurrent());

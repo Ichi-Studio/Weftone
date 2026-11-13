@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.NUnit;
 using NUnit.Framework;
 using Weftone.Adapters.Codecs;
@@ -25,6 +26,8 @@ public class MainWindowSmokeTests
         {
             Assert.That(window.FindControl<Button>("PlayButton"), Is.Not.Null);
             Assert.That(window.FindControl<Button>("StopButton"), Is.Not.Null);
+            Assert.That(window.FindControl<ToggleButton>("SongModeToggle"), Is.Not.Null, "Song 模式切换");
+            Assert.That(window.FindControl<PlaylistControl>("Playlist"), Is.Not.Null, "Playlist 自绘控件");
             Assert.That(window.FindControl<PianoRollControl>("Roll"), Is.Not.Null, "Piano Roll 自绘控件");
             Assert.That(window.FindControl<PianoKeysControl>("Keys"), Is.Not.Null, "键盘侧栏");
             Assert.That(window.FindControl<ScrollViewer>("RollScroll"), Is.Not.Null);

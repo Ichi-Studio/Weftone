@@ -22,6 +22,8 @@
         <Button x:Name="PlayButton" Content="播放" Command="{Binding PlayCommand}" />
         <Button x:Name="StopButton" Content="停止" Command="{Binding StopCommand}" />
         <Separator />
+        <ToggleButton x:Name="SongModeToggle" Content="Song 模式"
+                      IsChecked="{Binding IsSongMode}" />
         <TextBlock Text="Pattern" VerticalAlignment="Center" />
         <ComboBox ItemsSource="{Binding Patterns}" SelectedItem="{Binding SelectedPattern}" Width="110">
           <ComboBox.ItemTemplate>
@@ -44,15 +46,42 @@
       <TextBlock Text="{Binding StatusText}" />
     </Border>
 
-    <Grid ColumnDefinitions="72,*" Background="#181818">
-      <controls:PianoKeysControl x:Name="Keys" />
-      <ScrollViewer Grid.Column="1" x:Name="RollScroll"
-                    HorizontalScrollBarVisibility="Auto"
-                    VerticalScrollBarVisibility="Auto">
-        <controls:PianoRollControl x:Name="Roll"
-                                   Pattern="{Binding SelectedPattern}"
-                                   ViewModel="{Binding}" />
-      </ScrollViewer>
+    <Grid RowDefinitions="*,5,2*" Background="#181818">
+      <Grid Grid.Row="0" ColumnDefinitions="110,*">
+        <Border Background="#202020">
+          <ItemsControl ItemsSource="{Binding Patterns}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="domain:Pattern">
+                <Border Height="28" BorderBrush="#101014" BorderThickness="0,0,0,1">
+                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="6,0"
+                             Foreground="#C8C8CC" TextTrimming="CharacterEllipsis" />
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+        <ScrollViewer Grid.Column="1" x:Name="PlaylistScroll"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled">
+          <controls:PlaylistControl x:Name="Playlist"
+                                    Patterns="{Binding Patterns}"
+                                    Playlist="{Binding PlaylistClips}"
+                                    ViewModel="{Binding}" />
+        </ScrollViewer>
+      </Grid>
+
+      <Rectangle Grid.Row="1" Fill="#101014" />
+
+      <Grid Grid.Row="2" ColumnDefinitions="72,*">
+        <controls:PianoKeysControl x:Name="Keys" />
+        <ScrollViewer Grid.Column="1" x:Name="RollScroll"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto">
+          <controls:PianoRollControl x:Name="Roll"
+                                     Pattern="{Binding SelectedPattern}"
+                                     ViewModel="{Binding}" />
+        </ScrollViewer>
+      </Grid>
     </Grid>
   </DockPanel>
 </Window>
