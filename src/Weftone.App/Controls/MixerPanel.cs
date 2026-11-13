@@ -20,6 +20,7 @@ public sealed class MixerPanel : ContentControl
         AvaloniaProperty.Register<MixerPanel, MainWindowViewModel?>(nameof(ViewModel));
 
     private MainWindowViewModel? _subscribed;
+    private readonly List<Action> _autoValueUpdaters = [];
 
     static MixerPanel()
     {
@@ -52,10 +53,19 @@ public sealed class MixerPanel : ContentControl
         {
             Rebuild();
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.PlayheadTick))
+        {
+            // 有曲线的推子只读显示当前播放值（SPEC M2：不做写曲线的推子录制）
+            foreach (Action updater in _autoValueUpdaters)
+            {
+                updater();
+            }
+        }
     }
 
     private void Rebuild()
     {
+        _autoValueUpdaters.Clear();
         var stripPanel = new StackPanel { Orientation = Orientation.Horizontal };
         if (ViewModel is not null)
         {
@@ -102,29 +112,58 @@ public sealed class MixerPanel : ContentControl
             TextAlignment = TextAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
+        bool autoVolume = channel.VolumePoints.Count > 0;
         var volume = new Slider
         {
             Orientation = Orientation.Vertical,
             Minimum = 0,
             Maximum = 2,
-            Value = channel.Volume,
+            Value = autoVolume && vm is not null
+                ? vm.GetAutomationDisplayValue(channel, AutomationParameter.Volume)
+                : channel.Volume,
             Height = 110,
             HorizontalAlignment = HorizontalAlignment.Center,
+            IsEnabled = !autoVolume,
         };
         var volumeLabel = new TextBlock
         {
-            Text = channel.Volume.ToString("0.00"),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xA8, 0xA8, 0xB0)),
+            Text = autoVolume
+                ? $"A {volume.Value:0.00}"
+                : channel.Volume.ToString("0.00"),
+            Foreground = new SolidColorBrush(autoVolume
+                ? Color.FromRgb(0x8A, 0xF0, 0xE0)
+                : Color.FromRgb(0xA8, 0xA8, 0xB0)),
             TextAlignment = TextAlignment.Center,
         };
+        bool autoPan = channel.PanPoints.Count > 0;
         var pan = new Slider
         {
             Orientation = Orientation.Horizontal,
             Minimum = -1,
             Maximum = 1,
-            Value = channel.Pan,
+            Value = autoPan && vm is not null
+                ? vm.GetAutomationDisplayValue(channel, AutomationParameter.Pan)
+                : channel.Pan,
             Width = 76,
+            IsEnabled = !autoPan,
         };
+
+        if (vm is not null)
+        {
+            if (autoVolume)
+            {
+                _autoValueUpdaters.Add(() =>
+                {
+                    double value = vm.GetAutomationDisplayValue(channel, AutomationParameter.Volume);
+                    volume.Value = value;
+                    volumeLabel.Text = $"A {value:0.00}";
+                });
+            }
+            if (autoPan)
+            {
+                _autoValueUpdaters.Add(() => pan.Value = vm.GetAutomationDisplayValue(channel, AutomationParameter.Pan));
+            }
+        }
 
         var drag = new MixDragState();
         volume.AddHandler(PointerPressedEvent, (_, _) =>
@@ -175,7 +214,10 @@ public sealed class MixerPanel : ContentControl
     private Control BuildMasterStrip()
     {
         MainWindowViewModel? vm = ViewModel;
-        double master = vm?.MasterVolume ?? 1;
+        bool autoMaster = vm?.HasMasterAutomation == true;
+        double master = autoMaster && vm is not null
+            ? vm.GetMasterAutomationDisplayValue()
+            : vm?.MasterVolume ?? 1;
         var title = new TextBlock
         {
             Text = "Master",
@@ -190,13 +232,25 @@ public sealed class MixerPanel : ContentControl
             Value = master,
             Height = 110,
             HorizontalAlignment = HorizontalAlignment.Center,
+            IsEnabled = !autoMaster,
         };
         var label = new TextBlock
         {
-            Text = master.ToString("0.00"),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xC8, 0xFF)),
+            Text = autoMaster ? $"A {master:0.00}" : master.ToString("0.00"),
+            Foreground = new SolidColorBrush(autoMaster
+                ? Color.FromRgb(0x8A, 0xF0, 0xE0)
+                : Color.FromRgb(0xE8, 0xC8, 0xFF)),
             TextAlignment = TextAlignment.Center,
         };
+        if (vm is not null && autoMaster)
+        {
+            _autoValueUpdaters.Add(() =>
+            {
+                double value = vm.GetMasterAutomationDisplayValue();
+                volume.Value = value;
+                label.Text = $"A {value:0.00}";
+            });
+        }
         bool dragging = false;
         volume.AddHandler(PointerPressedEvent, (_, _) =>
         {

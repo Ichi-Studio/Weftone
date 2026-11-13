@@ -55,4 +55,36 @@ public class MainWindowSmokeTests
         Assert.That(roll!.Pattern, Is.SameAs(document.Patterns[0]), "Pattern 经绑定传入自绘控件");
         window.Close();
     }
+
+    [AvaloniaTest]
+    public void Automation_lane_renders_points_without_crash()
+    {
+        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
+        ProjectDocument document = session.Document;
+        document.Channels.Add(new Channel { Id = 1, Name = "Sine", Kind = ChannelKind.Sine });
+        document.Patterns.Add(new Pattern { Id = 10, Name = "P1" });
+        document.Patterns[0].Notes.Add(new Note { ChannelId = 1, Tick = 0, Key = 60, LengthTicks = 96 });
+        AutomationLanes.Insert(document.Channels[0].VolumePoints, new AutomationPoint { Tick = 0, Value = 0.1 });
+        AutomationLanes.Insert(document.Channels[0].VolumePoints, new AutomationPoint { Tick = 192, Value = 1.4 });
+        AutomationLanes.Insert(document.Channels[0].PanPoints, new AutomationPoint { Tick = 96, Value = -0.8 });
+        using var playback = new PlaybackService(() => new FakeBackend(), new PlanRenderer());
+        var viewModel = new MainWindowViewModel(session, playback, new FakeDialogs())
+        {
+            SelectedPattern = document.Patterns[0],
+            IsAutomationVisible = true,
+            SelectedAutomationTarget = new MainWindowViewModel.AutomationTargetItem(
+                AutomationTarget.Channel(1), AutomationParameter.Volume, "Sine · 音量"),
+        };
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        var lane = window.FindControl<AutomationLaneControl>("Lane");
+        Assert.Multiple(() =>
+        {
+            Assert.That(lane, Is.Not.Null, "自动化 lane 自绘控件");
+            Assert.That(viewModel.CurrentAutomationLane, Has.Count.EqualTo(2));
+            Assert.That(viewModel.CurrentAutomationRange.Min, Is.EqualTo(0.0));
+            Assert.That(viewModel.CurrentAutomationRange.Max, Is.EqualTo(2.0));
+        });
+        window.Close();
+    }
 }

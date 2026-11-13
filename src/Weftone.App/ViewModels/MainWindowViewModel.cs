@@ -21,6 +21,9 @@ public partial class MainWindowViewModel : ObservableObject
         Resize,
     }
 
+    /// <summary>自动化 lane 目标项（SPEC M2 D3=a：通道 volume/pan + master volume）。</summary>
+    public sealed record AutomationTargetItem(AutomationTarget Target, AutomationParameter Parameter, string Label);
+
     private readonly EditSession _session;
     private readonly PlaybackService _playback;
     private readonly IFileDialogService _dialogs;
@@ -32,6 +35,8 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _clipGesture;
     private long _clipFromTick;
     private int _clipFromPatternId;
+    private bool _autoGesture;
+    private long _autoLiveTick;
 
     [ObservableProperty]
     private string _title = "Weftone";
@@ -54,6 +59,12 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSongMode;
 
+    [ObservableProperty]
+    private bool _isAutomationVisible;
+
+    [ObservableProperty]
+    private AutomationTargetItem? _selectedAutomationTarget;
+
     /// <summary>最近一次 BeginAddNote 创建的音符（控件手势回引用）。</summary>
     public Note? LastAddedNote { get; private set; }
 
@@ -69,6 +80,75 @@ public partial class MainWindowViewModel : ObservableObject
 
     /// <summary>通道快照（导入/撤销后由 DocumentEdited 触发重取，ItemsControl 重建）。</summary>
     public IReadOnlyList<Channel> Channels => _session.Document.Channels.ToList();
+
+    /// <summary>自动化目标列表：每通道 volume/pan + master volume（SPEC M2）。</summary>
+    public IReadOnlyList<AutomationTargetItem> AutomationTargets
+    {
+        get
+        {
+            var targets = new List<AutomationTargetItem>();
+            foreach (Channel channel in _session.Document.Channels)
+            {
+                string label = string.IsNullOrEmpty(channel.Name) ? $"ch{channel.Id}" : channel.Name;
+                targets.Add(new AutomationTargetItem(
+                    AutomationTarget.Channel(channel.Id), AutomationParameter.Volume, $"{label} · 音量"));
+                targets.Add(new AutomationTargetItem(
+                    AutomationTarget.Channel(channel.Id), AutomationParameter.Pan, $"{label} · 声像"));
+            }
+            targets.Add(new AutomationTargetItem(
+                AutomationTarget.Master, AutomationParameter.Volume, "Master · 音量"));
+            return targets;
+        }
+    }
+
+    /// <summary>当前 lane 的点列表（目标缺失时为空表，控件安全降级）。</summary>
+    public IReadOnlyList<AutomationPoint> CurrentAutomationLane
+    {
+        get
+        {
+            AutomationTargetItem? target = SelectedAutomationTarget;
+            if (target is null || !AutomationLanes.Supports(target.Target, target.Parameter))
+            {
+                return [];
+            }
+            return AutomationLanes.Points(_session.Document, target.Target, target.Parameter);
+        }
+    }
+
+    /// <summary>当前 lane 值域（volume [0,2]、pan [-1,1]）。</summary>
+    public (double Min, double Max) CurrentAutomationRange => SelectedAutomationTarget is null
+        ? (0, 1)
+        : AutomationLanes.Range(SelectedAutomationTarget.Parameter);
+
+    /// <summary>自动化手势拖动中的点 tick（null=无手势）；控件高亮用。</summary>
+    public long? AutomationLiveTick => _autoGesture ? _autoLiveTick : null;
+
+    /// <summary>播放头 tick（Mixer 只读推子显示值与 lane 播放线用）。</summary>
+    public long PlayheadTick
+    {
+        get
+        {
+            (long num, long den) = TickMath.SamplesPerTick(_session.Document.SampleRate, _session.Document.Tempo);
+            return num == 0 ? 0 : _playback.Position * den / num;
+        }
+    }
+
+    /// <summary>Mixer 只读推子显示值：lane 有曲线时按播放头求值，否则静态值（SPEC M2）。</summary>
+    public double GetAutomationDisplayValue(Channel channel, AutomationParameter parameter)
+    {
+        List<AutomationPoint> points = parameter == AutomationParameter.Volume
+            ? channel.VolumePoints
+            : channel.PanPoints;
+        double fallback = parameter == AutomationParameter.Volume ? channel.Volume : channel.Pan;
+        return AutomationMath.Evaluate(points, fallback, PlayheadTick);
+    }
+
+    public double GetMasterAutomationDisplayValue()
+        => AutomationMath.Evaluate(
+            _session.Document.MasterVolumePoints, _session.Document.MasterVolume, PlayheadTick);
+
+    /// <summary>master 是否带自动化曲线（Mixer 只读推子判定）。</summary>
+    public bool HasMasterAutomation => _session.Document.MasterVolumePoints.Count > 0;
 
     public double MasterVolume
     {
@@ -164,6 +244,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         Tempo = _session.Document.Tempo;
         SelectedPattern = Patterns.FirstOrDefault();
+        RefreshAutomationTargets();
         OnPropertyChanged(nameof(Patterns));
         OnPropertyChanged(nameof(PlaylistClips));
         OnPropertyChanged(nameof(Channels));
@@ -173,12 +254,36 @@ public partial class MainWindowViewModel : ObservableObject
         DocumentEdited?.Invoke();
     }
 
+    /// <summary>通道增删后重建目标列表；选中项对应通道消失时回到首项。</summary>
+    private void RefreshAutomationTargets()
+    {
+        AutomationTargetItem? current = SelectedAutomationTarget;
+        if (current is not null
+            && current.Target.IsMaster)
+        {
+            return; // master 永远有效
+        }
+        IReadOnlyList<AutomationTargetItem> targets = AutomationTargets;
+        if (current is null || !targets.Any(t => t.Target == current.Target && t.Parameter == current.Parameter))
+        {
+            SelectedAutomationTarget = targets.FirstOrDefault();
+        }
+        OnPropertyChanged(nameof(AutomationTargets));
+    }
+
     partial void OnSelectedPatternChanged(Pattern? value)
     {
         if (_playback.IsPlaying)
         {
             _playback.UpdatePlan(CompileCurrent());
         }
+    }
+
+    partial void OnSelectedAutomationTargetChanged(AutomationTargetItem? value)
+    {
+        EndAutomationGesture();
+        OnPropertyChanged(nameof(CurrentAutomationLane));
+        OnPropertyChanged(nameof(CurrentAutomationRange));
     }
 
     partial void OnIsSongModeChanged(bool value)
@@ -326,6 +431,7 @@ public partial class MainWindowViewModel : ObservableObject
     public void UpdatePosition()
     {
         IsPlaying = _playback.IsPlaying;
+        OnPropertyChanged(nameof(PlayheadTick));
         if (!_playback.IsPlaying)
         {
             return;
@@ -393,6 +499,74 @@ public partial class MainWindowViewModel : ObservableObject
         _clipGesture = false;
         _session.EndTransaction();
         AfterEdit();
+    }
+
+    /// <summary>自动化手势（SPEC M2：画/拖/删三件套，事务合并单步撤销；拖动中不重编译——落点才交换 plan）。</summary>
+    public void BeginAddAutomationPoint(long tick, double value)
+    {
+        if (!BeginAutomationGesture("添加自动化点"))
+        {
+            return;
+        }
+        _session.Execute(new AddAutomationPointCommand(
+            SelectedAutomationTarget!.Target, SelectedAutomationTarget.Parameter,
+            new AutomationPoint { Tick = Math.Max(0, tick), Value = value }));
+        _autoLiveTick = Math.Max(0, tick);
+    }
+
+    public void BeginDragAutomationPoint(long tick)
+    {
+        if (!BeginAutomationGesture("拖动自动化点"))
+        {
+            return;
+        }
+        _autoLiveTick = tick;
+    }
+
+    public void DragAutomationPoint(long newTick, double newValue)
+    {
+        if (!_autoGesture || SelectedAutomationTarget is null)
+        {
+            return;
+        }
+        newTick = Math.Max(0, newTick);
+        _session.Execute(new MoveAutomationPointCommand(
+            SelectedAutomationTarget.Target, SelectedAutomationTarget.Parameter,
+            currentTick: _autoLiveTick, newTick, newValue));
+        _autoLiveTick = newTick;
+    }
+
+    public void RemoveAutomationPoint(long tick)
+    {
+        if (SelectedAutomationTarget is null)
+        {
+            return;
+        }
+        _session.Execute(new RemoveAutomationPointCommand(
+            SelectedAutomationTarget.Target, SelectedAutomationTarget.Parameter, tick));
+        AfterEdit();
+    }
+
+    public void EndAutomationGesture()
+    {
+        if (!_autoGesture)
+        {
+            return;
+        }
+        _autoGesture = false;
+        _session.EndTransaction();
+        AfterEdit();
+    }
+
+    private bool BeginAutomationGesture(string title)
+    {
+        if (_autoGesture || SelectedAutomationTarget is null)
+        {
+            return false;
+        }
+        _session.BeginTransaction(title);
+        _autoGesture = true;
+        return true;
     }
 
     [RelayCommand]
@@ -499,6 +673,9 @@ public partial class MainWindowViewModel : ObservableObject
         NotifyHistoryChanged();
         OnPropertyChanged(nameof(Channels));
         OnPropertyChanged(nameof(MasterVolume));
+        OnPropertyChanged(nameof(CurrentAutomationLane));
+        OnPropertyChanged(nameof(PlayheadTick));
+        RefreshAutomationTargets();
         DocumentEdited?.Invoke();
         if (_playback.IsPlaying)
         {

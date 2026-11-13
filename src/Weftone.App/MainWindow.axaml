@@ -83,15 +83,47 @@
 
       <Rectangle Grid.Row="1" Fill="#101014" />
 
-      <Grid Grid.Row="2" ColumnDefinitions="72,*">
-        <controls:PianoKeysControl x:Name="Keys" />
-        <ScrollViewer Grid.Column="1" x:Name="RollScroll"
-                      HorizontalScrollBarVisibility="Auto"
-                      VerticalScrollBarVisibility="Auto">
-          <controls:PianoRollControl x:Name="Roll"
-                                     Pattern="{Binding SelectedPattern}"
-                                     ViewModel="{Binding}" />
-        </ScrollViewer>
+      <Grid Grid.Row="2" RowDefinitions="*,Auto,Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="72,*">
+          <controls:PianoKeysControl x:Name="Keys" />
+          <ScrollViewer Grid.Column="1" x:Name="RollScroll"
+                        HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Auto">
+            <controls:PianoRollControl x:Name="Roll"
+                                       Pattern="{Binding SelectedPattern}"
+                                       ViewModel="{Binding}" />
+          </ScrollViewer>
+        </Grid>
+
+        <Border Grid.Row="1" Height="30" Background="#202020" Padding="8,0">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <ToggleButton Content="自动化" IsChecked="{Binding IsAutomationVisible}" />
+            <TextBlock Text="参数" VerticalAlignment="Center" Foreground="#A8A8B0" />
+            <ComboBox ItemsSource="{Binding AutomationTargets}"
+                      SelectedItem="{Binding SelectedAutomationTarget}" Width="150">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:MainWindowViewModel+AutomationTargetItem">
+                  <TextBlock Text="{Binding Label}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2" ColumnDefinitions="72,*"
+              IsVisible="{Binding IsAutomationVisible}" Height="110">
+          <Border Background="#202020">
+            <TextBlock Text="曲线" VerticalAlignment="Center" HorizontalAlignment="Center"
+                       Foreground="#707078" />
+          </Border>
+          <ScrollViewer Grid.Column="1" x:Name="LaneScroll"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Disabled">
+            <controls:AutomationLaneControl x:Name="Lane"
+                                            Pattern="{Binding SelectedPattern}"
+                                            ViewModel="{Binding}" />
+          </ScrollViewer>
+        </Grid>
       </Grid>
     </Grid>
   </DockPanel>

@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Weftone.App.ViewModels;
@@ -19,12 +20,14 @@ public partial class MainWindow : Window
         DataContextChanged += (_, _) => SubscribeViewModel();
     }
 
-    /// <summary>滚动/尺寸变化时同步视口：Roll 用于裁剪，Keys 侧栏纵向跟随。</summary>
+    /// <summary>滚动/尺寸变化时同步视口：Roll 用于裁剪，Keys 侧栏纵向跟随，自动化 lane 横向跟随。</summary>
     private void SyncRollViewport()
     {
         Roll.SetViewport(RollScroll.Offset.X, RollScroll.Offset.Y,
             RollScroll.Viewport.Width, RollScroll.Viewport.Height);
         Keys.VerticalOffset = RollScroll.Offset.Y;
+        LaneScroll.Offset = new Vector(RollScroll.Offset.X, 0);
+        Lane.SetViewport(RollScroll.Offset.X, RollScroll.Viewport.Width);
     }
 
     private void SyncPlaylistViewport()
@@ -50,6 +53,7 @@ public partial class MainWindow : Window
     {
         Roll.InvalidateVisual();
         Playlist.InvalidateVisual();
+        Lane.InvalidateVisual();
     }
 
     protected override void OnOpened(EventArgs e)
