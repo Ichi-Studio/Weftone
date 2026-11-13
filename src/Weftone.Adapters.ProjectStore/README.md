@@ -10,3 +10,6 @@
 
 Save 时按源文件重算 SHA256 回填 AssetRef；资产相对路径由文档定义（限 `assets/` 前缀），
 SHA256 命名去重策略留 M1b 再定。
+
+`project.json` 可选字段 `masterVolume`（M1b，缺省 1.0，读入校验 [0,2]）：
+旧包无该字段照常加载（默认 1.0），schema 版本不变（字段双向兼容）。

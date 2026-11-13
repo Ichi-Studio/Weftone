@@ -12,13 +12,15 @@ Avalonia UI 进程（组合根，AGENTS.md §4），引用 Application + Engine 
   右键=删除。命令与事务全部经 ViewModel，控件只发意图。
 - `Controls/PlaylistControl`（M1b 竖切 3）：一轨一 Pattern，clip 块=pattern
   内容长度+1 拍；手势：空轨左键=放置 clip、拖 clip=移动（可换轨）、右键=删除。
+- `Controls/MixerPanel`（M1b 竖切 4）：每通道音量竖推子 + pan 横推子 + 名称，
+  右端 master；拖动中预览实时反映播放，释放时一条命令入撤销栈（标准控件组合）。
 - `Controls/PianoKeysControl`：128 键侧栏，纵向偏移与 Roll 同步滚动。
 - `Controls/PianoRollGeometry` / `PlaylistGeometry`：几何/命中纯函数
   （无 Avalonia 依赖，headless 单测）；时间轴 tick↔pixel 映射共用。
 - `ViewModels/MainWindowViewModel`：MVVM（CommunityToolkit.Mvvm 源生成器）。
   Pattern 循环 / Song 线性播放切换（IsSongMode）、音符与 clip 手势事务
-  （拖拽合并单条撤销）、工程存取、脏标记标题；DocumentEdited 事件驱动
-  自绘控件在撤销/重做/换工程后重画。
+  （拖拽合并单条撤销）、混音/master 推子预览-后提交、采样导入与 WAV 导出、
+  工程存取、脏标记标题；DocumentEdited 事件驱动自绘控件在撤销/重做/换工程后重画。
 - `Services/IFileDialogService` / `FileDialogService`：StorageProvider 抽象，
   VM 不见 Avalonia 类型、可 headless 测试。
 

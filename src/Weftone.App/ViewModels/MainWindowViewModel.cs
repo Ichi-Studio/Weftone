@@ -67,6 +67,32 @@ public partial class MainWindowViewModel : ObservableObject
 
     public IReadOnlyList<Clip> PlaylistClips => _session.Document.Playlist;
 
+    /// <summary>通道快照（导入/撤销后由 DocumentEdited 触发重取，ItemsControl 重建）。</summary>
+    public IReadOnlyList<Channel> Channels => _session.Document.Channels.ToList();
+
+    public double MasterVolume
+    {
+        get => _session.Document.MasterVolume;
+        set => SetMasterPreview(value);
+    }
+
+    private double _masterFrom;
+    private bool _masterGesture;
+    private bool _mixGesture;
+    private Channel? _mixChannel;
+    private double _mixFromVolume;
+    private double _mixFromPan;
+
+    private void SetMasterPreview(double value)
+    {
+        // 拖动中直接改文档实时反映播放；提交点（EndMasterEdit）走命令入撤销栈
+        _session.Document.MasterVolume = Math.Clamp(value, 0, 2);
+        if (_playback.IsPlaying)
+        {
+            _playback.UpdatePlan(CompileCurrent());
+        }
+    }
+
     public MainWindowViewModel(EditSession session, PlaybackService playback, IFileDialogService dialogs)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -140,6 +166,8 @@ public partial class MainWindowViewModel : ObservableObject
         SelectedPattern = Patterns.FirstOrDefault();
         OnPropertyChanged(nameof(Patterns));
         OnPropertyChanged(nameof(PlaylistClips));
+        OnPropertyChanged(nameof(Channels));
+        OnPropertyChanged(nameof(MasterVolume));
         RefreshTitle();
         NotifyHistoryChanged();
         DocumentEdited?.Invoke();
@@ -367,10 +395,110 @@ public partial class MainWindowViewModel : ObservableObject
         AfterEdit();
     }
 
+    [RelayCommand]
+    private async Task ImportSampleAsync()
+    {
+        string? path = await _dialogs.OpenWavAsync();
+        if (path is null)
+        {
+            return;
+        }
+        try
+        {
+            Channel channel = _session.ImportSample(path);
+            AfterEdit();
+            StatusText = $"已导入采样 → 通道「{channel.Name}」";
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or InvalidOperationException)
+        {
+            StatusText = $"导入失败：{Path.GetFileName(path)} 不是可解码的 WAV";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync()
+    {
+        string? path = await _dialogs.SaveWavAsync();
+        if (path is null)
+        {
+            return;
+        }
+        try
+        {
+            long frames = _session.ExportWav(path);
+            StatusText = $"已导出 {Path.GetFileName(path)}（{frames / (double)_session.Document.SampleRate:0.###}s）";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            StatusText = $"导出失败：{ex.Message}";
+        }
+    }
+
+    /// <summary>Mixer 推子手势：拖动中直接改文档实时反映，释放时一条命令入撤销栈。</summary>
+    public void BeginMixEdit(Channel channel)
+    {
+        _mixGesture = true;
+        _mixChannel = channel;
+        _mixFromVolume = channel.Volume;
+        _mixFromPan = channel.Pan;
+    }
+
+    public void DragMixEdit(Channel channel, double volume, double pan)
+    {
+        if (!_mixGesture || !ReferenceEquals(channel, _mixChannel))
+        {
+            return;
+        }
+        channel.Volume = Math.Clamp(volume, 0, 2);
+        channel.Pan = Math.Clamp(pan, -1, 1);
+        if (_playback.IsPlaying)
+        {
+            _playback.UpdatePlan(CompileCurrent());
+        }
+    }
+
+    public void EndMixEdit(Channel channel)
+    {
+        if (!_mixGesture || !ReferenceEquals(channel, _mixChannel))
+        {
+            return;
+        }
+        _mixGesture = false;
+        _mixChannel = null;
+        if (channel.Volume != _mixFromVolume || channel.Pan != _mixFromPan)
+        {
+            _session.Execute(new SetChannelMixCommand(
+                channel.Id, _mixFromVolume, _mixFromPan, channel.Volume, channel.Pan));
+        }
+        AfterEdit();
+    }
+
+    public void BeginMasterEdit()
+    {
+        _masterGesture = true;
+        _masterFrom = _session.Document.MasterVolume;
+    }
+
+    public void EndMasterEdit()
+    {
+        if (!_masterGesture)
+        {
+            return;
+        }
+        _masterGesture = false;
+        if (_session.Document.MasterVolume != _masterFrom)
+        {
+            _session.Execute(new SetMasterVolumeCommand(_masterFrom, _session.Document.MasterVolume));
+        }
+        AfterEdit();
+    }
+
     private void AfterEdit()
     {
         RefreshTitle();
         NotifyHistoryChanged();
+        OnPropertyChanged(nameof(Channels));
+        OnPropertyChanged(nameof(MasterVolume));
         DocumentEdited?.Invoke();
         if (_playback.IsPlaying)
         {

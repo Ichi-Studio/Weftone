@@ -69,7 +69,7 @@ public class CommandHistoryTests
     {
         var document = NewDocument();
         var history = new CommandHistory();
-        history.Execute(new SetChannelMixCommand(1, 0.5, -0.25), document);
+        history.Execute(new SetChannelMixCommand(1, 1.0, 0.0, 0.5, -0.25), document);
         Assert.Multiple(() =>
         {
             Assert.That(document.Channels[0].Volume, Is.EqualTo(0.5));
@@ -90,7 +90,7 @@ public class CommandHistoryTests
         var history = new CommandHistory();
         Assert.That(() => history.Execute(new SetTempoCommand(5), document),
             Throws.InstanceOf<ArgumentOutOfRangeException>());
-        Assert.That(() => history.Execute(new SetChannelMixCommand(1, 3, 0), document),
+        Assert.That(() => history.Execute(new SetChannelMixCommand(1, 1.0, 0.0, 3, 0), document),
             Throws.InstanceOf<ArgumentOutOfRangeException>());
         Assert.That(history.CanUndo, Is.False, "失败命令不得入栈");
     }

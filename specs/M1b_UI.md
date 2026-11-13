@@ -82,6 +82,15 @@ M1a 已有 AddNote/RemoveNote/SetTempo/SetChannelMix。M1b 新增：
   一次拖拽（按下→移动→释放）合并为单条撤销记录；连续同类小步编辑可合并。
 - 撤销/重做快捷键 Ctrl+Z / Ctrl+Y，工具栏按钮同步 CanUndo/CanRedo。
 
+实现补记（2026-11-13）：
+- 合并机制落地为事务（Begin/EndTransaction + CompositeCommand 逆序回滚）。
+- 连续值命令（MoveNote/ResizeNote/MoveClip/SetChannelMix/SetMasterVolume）改为
+  显式 from/to：拖拽预览直接改文档（实时反映播放），释放时以 from=拖前值入栈一条命令，
+  Revert 精确还原。SetMasterVolume 为 Mixer master 推子补入（spec 命令清单外补一条，
+  维持「撤销覆盖所有编辑」验收）。
+- ImportAsset 落地为 ImportSampleCommand（AssetRef + sampler 通道一步注册一步撤销），
+  解码数据与源文件留 EditSession 工作区/内存。
+
 ## 工程存取与采样导入（Application + Adapters）
 
 - 打开/保存 .weft：复用 WeftProjectStore（M1a），UI 经 OpenFileDialog/SaveFileDialog。

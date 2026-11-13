@@ -12,7 +12,7 @@ public class MainWindowViewModelGestureTests
 {
     private static MainWindowViewModel NewViewModel(out EditSession session, out Pattern pattern)
     {
-        session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         ProjectDocument document = session.Document;
         document.Channels.Add(new Channel { Id = 1, Name = "Sine", Kind = ChannelKind.Sine });
         document.Patterns.Add(new Pattern { Id = 10, Name = "P1" });
@@ -106,7 +106,7 @@ public class MainWindowViewModelGestureTests
     [Test]
     public void Play_without_pattern_reports_status()
     {
-        var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         var vm = new MainWindowViewModel(
             session, new PlaybackService(() => new FakeBackend(), new PlanRenderer()), new FakeDialogs());
         vm.PlayCommand.Execute(null);
@@ -140,7 +140,7 @@ public class MainWindowViewModelGestureTests
     [Test]
     public void BeginAddNote_without_channels_is_noop()
     {
-        var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         session.Document.Patterns.Add(new Pattern { Id = 10, Name = "P1" });
         var vm = new MainWindowViewModel(
             session, new PlaybackService(() => new FakeBackend(), new PlanRenderer()), new FakeDialogs())

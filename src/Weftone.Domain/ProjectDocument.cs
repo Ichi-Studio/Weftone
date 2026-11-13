@@ -11,6 +11,8 @@ public sealed class ProjectDocument
 
     public int Tempo { get; set; } = 140;
     public int SampleRate { get; set; } = 48_000;
+    /// <summary>主控音量 [0,2]，1.0 = 不衰减（M1b Mixer master 推子）。</summary>
+    public double MasterVolume { get; set; } = 1.0;
     public List<Channel> Channels { get; } = [];
     public List<Pattern> Patterns { get; } = [];
     public List<Clip> Playlist { get; } = [];

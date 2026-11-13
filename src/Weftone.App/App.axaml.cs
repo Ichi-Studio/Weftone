@@ -20,7 +20,8 @@ public partial class App : Avalonia.Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             // 组合根（AGENTS.md §4：DI 只在组合根）：装配 Application + Adapters + Engine。
-            var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+            var session = new EditSession(
+                new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
             try
             {
                 session.NewDemo();

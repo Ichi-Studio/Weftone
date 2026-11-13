@@ -12,7 +12,7 @@ public class MainWindowViewModelPlaylistTests
 {
     private static MainWindowViewModel NewViewModel(out EditSession session, out ProjectDocument document)
     {
-        session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         document = session.Document;
         document.Channels.Add(new Channel { Id = 1, Name = "Sine", Kind = ChannelKind.Sine });
         document.Patterns.Add(new Pattern { Id = 10, Name = "P1" });

@@ -1,0 +1,230 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Weftone.App.ViewModels;
+using Weftone.Domain;
+
+namespace Weftone.App.Controls;
+
+/// <summary>
+/// Mixer 面板（M1b 竖切 4）：每通道竖推子（音量 0..2）+ 横推子（pan -1..1）+ 名称，
+/// 右端 master 推子。拖动中经 VM 预览实时反映播放，释放时一条命令入撤销栈
+/// （spec §自绘：Mixer 用标准控件组合）。
+/// </summary>
+public sealed class MixerPanel : ContentControl
+{
+    public static readonly StyledProperty<MainWindowViewModel?> ViewModelProperty =
+        AvaloniaProperty.Register<MixerPanel, MainWindowViewModel?>(nameof(ViewModel));
+
+    private MainWindowViewModel? _subscribed;
+
+    static MixerPanel()
+    {
+        ViewModelProperty.Changed.AddClassHandler<MixerPanel>(static (c, _) => c.OnViewModelChanged());
+    }
+
+    public MainWindowViewModel? ViewModel
+    {
+        get => GetValue(ViewModelProperty);
+        set => SetValue(ViewModelProperty, value);
+    }
+
+    private void OnViewModelChanged()
+    {
+        if (_subscribed is not null)
+        {
+            _subscribed.PropertyChanged -= OnViewModelPropertyChanged;
+        }
+        _subscribed = ViewModel;
+        if (_subscribed is not null)
+        {
+            _subscribed.PropertyChanged += OnViewModelPropertyChanged;
+        }
+        Rebuild();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainWindowViewModel.Channels) or nameof(MainWindowViewModel.MasterVolume))
+        {
+            Rebuild();
+        }
+    }
+
+    private void Rebuild()
+    {
+        var stripPanel = new StackPanel { Orientation = Orientation.Horizontal };
+        if (ViewModel is not null)
+        {
+            foreach (Channel channel in ViewModel.Channels)
+            {
+                stripPanel.Children.Add(BuildChannelStrip(channel));
+            }
+            stripPanel.Children.Add(BuildMasterStrip());
+        }
+        Content = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = stripPanel,
+        };
+    }
+
+    private static Border StripShell(bool isMaster, params Control[] content)
+    {
+        var panel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 4 };
+        foreach (Control control in content)
+        {
+            panel.Children.Add(control);
+        }
+        return new Border
+        {
+            Width = 92,
+            Padding = new Thickness(6, 8),
+            Margin = new Thickness(1, 0),
+            Background = new SolidColorBrush(isMaster
+                ? Color.FromRgb(0x2A, 0x22, 0x30)
+                : Color.FromRgb(0x22, 0x22, 0x28)),
+            Child = panel,
+        };
+    }
+
+    private Control BuildChannelStrip(Channel channel)
+    {
+        MainWindowViewModel? vm = ViewModel;
+        var name = new TextBlock
+        {
+            Text = channel.Name,
+            Foreground = Brushes.White,
+            TextAlignment = TextAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        var volume = new Slider
+        {
+            Orientation = Orientation.Vertical,
+            Minimum = 0,
+            Maximum = 2,
+            Value = channel.Volume,
+            Height = 110,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var volumeLabel = new TextBlock
+        {
+            Text = channel.Volume.ToString("0.00"),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xA8, 0xA8, 0xB0)),
+            TextAlignment = TextAlignment.Center,
+        };
+        var pan = new Slider
+        {
+            Orientation = Orientation.Horizontal,
+            Minimum = -1,
+            Maximum = 1,
+            Value = channel.Pan,
+            Width = 76,
+        };
+
+        var drag = new MixDragState();
+        volume.AddHandler(PointerPressedEvent, (_, _) =>
+        {
+            drag.Volume = true;
+            vm?.BeginMixEdit(channel);
+        }, RoutingStrategies.Tunnel);
+        volume.AddHandler(PointerReleasedEvent, (_, _) =>
+        {
+            if (drag.Volume)
+            {
+                drag.Volume = false;
+                vm?.EndMixEdit(channel);
+            }
+        }, RoutingStrategies.Tunnel);
+        volume.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Slider.ValueProperty && drag.Volume)
+            {
+                volumeLabel.Text = volume.Value.ToString("0.00");
+                vm?.DragMixEdit(channel, volume.Value, channel.Pan);
+            }
+        };
+
+        pan.AddHandler(PointerPressedEvent, (_, _) =>
+        {
+            drag.Pan = true;
+            vm?.BeginMixEdit(channel);
+        }, RoutingStrategies.Tunnel);
+        pan.AddHandler(PointerReleasedEvent, (_, _) =>
+        {
+            if (drag.Pan)
+            {
+                drag.Pan = false;
+                vm?.EndMixEdit(channel);
+            }
+        }, RoutingStrategies.Tunnel);
+        pan.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Slider.ValueProperty && drag.Pan)
+            {
+                vm?.DragMixEdit(channel, channel.Volume, pan.Value);
+            }
+        };
+        return StripShell(isMaster: false, name, volume, volumeLabel, pan);
+    }
+
+    private Control BuildMasterStrip()
+    {
+        MainWindowViewModel? vm = ViewModel;
+        double master = vm?.MasterVolume ?? 1;
+        var title = new TextBlock
+        {
+            Text = "Master",
+            Foreground = Brushes.White,
+            TextAlignment = TextAlignment.Center,
+        };
+        var volume = new Slider
+        {
+            Orientation = Orientation.Vertical,
+            Minimum = 0,
+            Maximum = 2,
+            Value = master,
+            Height = 110,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var label = new TextBlock
+        {
+            Text = master.ToString("0.00"),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xC8, 0xFF)),
+            TextAlignment = TextAlignment.Center,
+        };
+        bool dragging = false;
+        volume.AddHandler(PointerPressedEvent, (_, _) =>
+        {
+            dragging = true;
+            vm?.BeginMasterEdit();
+        }, RoutingStrategies.Tunnel);
+        volume.AddHandler(PointerReleasedEvent, (_, _) =>
+        {
+            if (dragging)
+            {
+                dragging = false;
+                vm?.EndMasterEdit();
+            }
+        }, RoutingStrategies.Tunnel);
+        volume.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Slider.ValueProperty && dragging && vm is not null)
+            {
+                label.Text = volume.Value.ToString("0.00");
+                vm.MasterVolume = volume.Value;
+            }
+        };
+        return StripShell(isMaster: true, title, volume, label);
+    }
+
+    private sealed class MixDragState
+    {
+        public bool Volume;
+        public bool Pan;
+    }
+}

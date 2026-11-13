@@ -9,7 +9,9 @@
 - `PlaybackService`（M1b）：实时播放用例。停止-交换-恢复（D2=a）、
   采样率变化经后端工厂重建、`IsLooping` 供 UI 跳过到末尾自动停。
 - `EditSession`（M1b）：UI 线程单写者编辑会话——Document + CommandHistory +
-  资产临时工作区；命令事务（Begin/EndTransaction）把拖拽手势合并为单条撤销。
+  资产临时工作区；命令事务（Begin/EndTransaction）把拖拽手势合并为单条撤销；
+  `ImportSample`（解码校验 → 工作区 → ImportSampleCommand 一步注册资产+通道）；
+  `ExportWav`（Song 全时间轴离线渲染，float32 WAV，独立离线渲染器实例）。
 - `ProjectRenderService` / `WavWriter`：离线导出（M1a 竖切 4，CLI 接入）。
 - `AssetPreparer`：解码 + 重采样 + AssetRef 映射（M1a 竖切 3）。
 - `TickMath`：tick → sample 整数截断映射（PPQ=96）。

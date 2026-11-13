@@ -17,7 +17,7 @@ public class MainWindowSmokeTests
     [AvaloniaTest]
     public void MainWindow_opens_with_transport_controls()
     {
-        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         using var playback = new PlaybackService(() => new FakeBackend(), new PlanRenderer());
         var viewModel = new MainWindowViewModel(session, playback, new FakeDialogs());
         var window = new MainWindow { DataContext = viewModel };
@@ -29,6 +29,7 @@ public class MainWindowSmokeTests
             Assert.That(window.FindControl<ToggleButton>("SongModeToggle"), Is.Not.Null, "Song 模式切换");
             Assert.That(window.FindControl<PlaylistControl>("Playlist"), Is.Not.Null, "Playlist 自绘控件");
             Assert.That(window.FindControl<PianoRollControl>("Roll"), Is.Not.Null, "Piano Roll 自绘控件");
+            Assert.That(window.FindControl<MixerPanel>("Mixer"), Is.Not.Null, "Mixer 面板");
             Assert.That(window.FindControl<PianoKeysControl>("Keys"), Is.Not.Null, "键盘侧栏");
             Assert.That(window.FindControl<ScrollViewer>("RollScroll"), Is.Not.Null);
         });
@@ -38,7 +39,7 @@ public class MainWindowSmokeTests
     [AvaloniaTest]
     public void Piano_roll_renders_pattern_notes_without_crash()
     {
-        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         ProjectDocument document = session.Document;
         document.Channels.Add(new Channel { Id = 1, Name = "Sine", Kind = ChannelKind.Sine });
         document.Patterns.Add(new Pattern { Id = 10, Name = "P1" });

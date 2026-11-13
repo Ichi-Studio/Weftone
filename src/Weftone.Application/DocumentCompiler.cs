@@ -147,7 +147,7 @@ public sealed class DocumentCompiler
         {
             SampleRate = document.SampleRate,
             Channels = 2,
-            MasterGain = 1f,
+            MasterGain = (float)Math.Clamp(document.MasterVolume, 0, 2),
             TotalSamples = totalSamples,
             LoopStartSample = 0,
             LoopEndSample = loop ? totalSamples : 0,

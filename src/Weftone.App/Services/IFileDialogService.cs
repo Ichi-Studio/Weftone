@@ -6,4 +6,8 @@ public interface IFileDialogService
     Task<string?> OpenProjectAsync();
 
     Task<string?> SaveProjectAsync();
+
+    Task<string?> OpenWavAsync();
+
+    Task<string?> SaveWavAsync();
 }

@@ -24,7 +24,7 @@ public class MainWindowViewModelTests
     [Test]
     public void Play_then_stop_toggles_is_playing()
     {
-        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         session.Document.Channels.Add(new Domain.Channel { Id = 1, Name = "Sine", Kind = Domain.ChannelKind.Sine });
         session.Document.Patterns.Add(new Domain.Pattern { Id = 10, Name = "P1" });
         using var playback = new PlaybackService(() => new FakeBackend(), new PlanRenderer());
@@ -45,7 +45,7 @@ public class MainWindowViewModelTests
     [Test]
     public void Untitled_project_shows_placeholder_name()
     {
-        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        using var session = new EditSession(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
         using var playback = new PlaybackService(() => new FakeBackend(), new PlanRenderer());
         var vm = new MainWindowViewModel(session, playback, new FakeDialogs());
         Assert.That(vm.Title, Does.Contain("未命名"));

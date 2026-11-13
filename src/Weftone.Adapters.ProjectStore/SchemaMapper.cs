@@ -16,6 +16,7 @@ internal sealed class ProjectJson
     [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; }
     [JsonPropertyName("tempo")] public int Tempo { get; set; }
     [JsonPropertyName("sampleRate")] public int SampleRate { get; set; }
+    [JsonPropertyName("masterVolume")] public double MasterVolume { get; set; } = 1.0;
     [JsonPropertyName("channels")] public List<ChannelJson> Channels { get; set; } = [];
     [JsonPropertyName("patterns")] public List<PatternJson> Patterns { get; set; } = [];
     [JsonPropertyName("playlist")] public List<ClipJson> Playlist { get; set; } = [];
@@ -72,6 +73,7 @@ internal static class SchemaMapper
             SchemaVersion = WeftProjectStore.SchemaVersion,
             Tempo = document.Tempo,
             SampleRate = document.SampleRate,
+            MasterVolume = document.MasterVolume,
             Channels = document.Channels.Select(c => new ChannelJson
             {
                 Id = c.Id, Name = c.Name, Kind = KindToString(c.Kind),
@@ -99,7 +101,12 @@ internal static class SchemaMapper
 
     public static ProjectDocument ToDomain(ProjectJson json)
     {
-        var document = new ProjectDocument { Tempo = json.Tempo, SampleRate = json.SampleRate };
+        var document = new ProjectDocument
+        {
+            Tempo = json.Tempo,
+            SampleRate = json.SampleRate,
+            MasterVolume = json.MasterVolume,
+        };
         var channelIds = new HashSet<int>();
         foreach (ChannelJson c in json.Channels)
         {
@@ -167,6 +174,8 @@ internal static class SchemaMapper
             $"BPM 越界: {document.Tempo}");
         Require(document.SampleRate is >= 8000 and <= 192_000,
             $"采样率越界: {document.SampleRate}");
+        Require(document.MasterVolume is >= 0 and <= 2,
+            $"主控音量越界: {document.MasterVolume}");
         return document;
     }
 

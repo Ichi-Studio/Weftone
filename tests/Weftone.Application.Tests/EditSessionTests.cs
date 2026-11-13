@@ -4,13 +4,14 @@ using Weftone.Adapters.ProjectStore;
 using Weftone.Application;
 using Weftone.Domain;
 using Weftone.Domain.Commands;
+using Weftone.Engine;
 
 namespace Weftone.Application.Tests;
 
 public class EditSessionTests
 {
     private static EditSession NewSession() =>
-        new(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler());
+        new(new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
 
     private static string TempProjectPath() =>
         Path.Combine(Path.GetTempPath(), "weftone-edit-session-" + Guid.NewGuid().ToString("N") + ".weft");

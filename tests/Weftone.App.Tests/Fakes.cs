@@ -13,6 +13,15 @@ internal sealed class FakeBackend : IAudioBackend
 
 internal sealed class FakeDialogs : IFileDialogService
 {
+    public string? WavToOpen { get; set; }
+
+    public string? WavToSave { get; set; }
+
     public Task<string?> OpenProjectAsync() => Task.FromResult<string?>(null);
+
     public Task<string?> SaveProjectAsync() => Task.FromResult<string?>(null);
+
+    public Task<string?> OpenWavAsync() => Task.FromResult(WavToOpen);
+
+    public Task<string?> SaveWavAsync() => Task.FromResult(WavToSave);
 }
