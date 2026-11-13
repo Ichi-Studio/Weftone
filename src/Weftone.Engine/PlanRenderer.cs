@@ -6,6 +6,8 @@ namespace Weftone.Engine;
 /// RenderPlan 离线/实时两用渲染器：64 复音预分配池，事件按 StartSample 顺序激活，
 /// 池满时最早结束者被偷（FadeTail 线性淡出防 click），新事件入 pending 环等位。
 /// Sine：双精度相位；Sampler：资产线性插值、MIDI60=原速、资产耗尽自然结束。
+/// 自动化（SPEC M2）：声部按通道 GainBreakpoints 曲线逐样本线性斜坡（vol/pan 预乘、
+/// velocity 留在 GainLeft），master 曲线同理后乘；游标循环回绕二分重定位。
 /// 全程零分配（RtAssert 守护）。
 /// </summary>
 public sealed class PlanRenderer : IPlanRenderer
@@ -29,6 +31,8 @@ public sealed class PlanRenderer : IPlanRenderer
         public float GainRight;
         public RenderVoiceKind Kind;
         public int StealFade;
+        public int GainCurveIndex;
+        public int GainCursor;
     }
 
     private readonly Voice[] _pool = new Voice[MaxVoices];
@@ -40,6 +44,7 @@ public sealed class PlanRenderer : IPlanRenderer
     private long _position;
     private long _loopStart;
     private long _loopEnd;
+    private int _masterGainCursor;
 
     public long Position => _position;
 
@@ -54,6 +59,7 @@ public sealed class PlanRenderer : IPlanRenderer
         _pendingCount = 0;
         _loopStart = plan.LoopStartSample;
         _loopEnd = plan.LoopEndSample;
+        _masterGainCursor = 0;
         DroppedEvents = 0;
         Array.Clear(_pool);
     }
@@ -94,7 +100,7 @@ public sealed class PlanRenderer : IPlanRenderer
             rendered += (int)segment;
         }
 
-        if (plan.MasterGain != 1f)
+        if (plan.MasterGainCurve is null && plan.MasterGain != 1f)
         {
             float master = plan.MasterGain;
             for (int i = 0; i < interleaved.Length; i++)
@@ -107,7 +113,8 @@ public sealed class PlanRenderer : IPlanRenderer
     private void RenderSegment(RenderPlan plan, Span<float> interleaved, int offsetFrames, int frames)
     {
         Span<float> slice = interleaved.Slice(offsetFrames * 2, frames * 2);
-        long end = _position + frames;
+        long segmentStart = _position;
+        long end = segmentStart + frames;
 
         while (_nextEvent < plan.Voices.Length && plan.Voices[_nextEvent].StartSample < end)
         {
@@ -124,11 +131,23 @@ public sealed class PlanRenderer : IPlanRenderer
             }
             if (voice.StealFade > 0)
             {
-                RenderFadeTail(ref voice, plan.Assets, slice, frames);
+                RenderFadeTail(ref voice, plan.Assets, plan.ChannelGainCurves, segmentStart, slice, frames);
             }
             else
             {
-                RenderGate(ref voice, plan.Assets, slice, frames);
+                RenderGate(ref voice, plan.Assets, plan.ChannelGainCurves, segmentStart, slice, frames);
+            }
+        }
+
+        if (plan.MasterGainCurve is { } masterCurve)
+        {
+            for (int i = 0; i < frames; i++)
+            {
+                long position = segmentStart + i;
+                AdvanceGainCursor(ref _masterGainCursor, masterCurve, position);
+                InterpolateGain(masterCurve, _masterGainCursor, position, out float master, out _);
+                slice[2 * i] *= master;
+                slice[2 * i + 1] *= master;
             }
         }
 
@@ -173,6 +192,8 @@ public sealed class PlanRenderer : IPlanRenderer
             GainRight = voice.GainRight,
             Kind = voice.Kind,
             StealFade = 0,
+            GainCurveIndex = voice.GainCurveIndex,
+            GainCursor = 0,
         };
     }
 
@@ -230,7 +251,8 @@ public sealed class PlanRenderer : IPlanRenderer
         }
     }
 
-    private static void RenderGate(ref Voice voice, PlanAsset[] assets, Span<float> interleaved, int frames)
+    private static void RenderGate(ref Voice voice, PlanAsset[] assets, GainBreakpoint[][] curves,
+        long segmentStart, Span<float> interleaved, int frames)
     {
         int i = SkipWait(ref voice, frames);
         while (i < frames && voice.Remaining > 0)
@@ -238,19 +260,20 @@ public sealed class PlanRenderer : IPlanRenderer
             float envelope = voice.Remaining <= FadeTail
                 ? voice.Remaining / (float)FadeTail
                 : 1f;
+            ResolveGain(ref voice, curves, segmentStart + i, out float gainLeft, out float gainRight);
             float left;
             float right;
             if (voice.Kind == RenderVoiceKind.Sine)
             {
                 float s = MathF.Sin((float)voice.Phase);
-                left = s * voice.GainLeft;
-                right = s * voice.GainRight;
+                left = s * gainLeft;
+                right = s * gainRight;
                 AdvancePhase(ref voice);
             }
             else
             {
                 PlanAsset asset = assets[voice.AssetIndex];
-                ReadAsset(asset, ref voice, voice.GainLeft, voice.GainRight, out left, out right);
+                ReadAsset(asset, ref voice, gainLeft, gainRight, out left, out right);
                 if (voice.AssetPosition >= asset.Frames)
                 {
                     voice.Remaining = 1;
@@ -267,24 +290,26 @@ public sealed class PlanRenderer : IPlanRenderer
         }
     }
 
-    private static void RenderFadeTail(ref Voice voice, PlanAsset[] assets, Span<float> interleaved, int frames)
+    private static void RenderFadeTail(ref Voice voice, PlanAsset[] assets, GainBreakpoint[][] curves,
+        long segmentStart, Span<float> interleaved, int frames)
     {
         int i = SkipWait(ref voice, frames);
         while (i < frames && voice.StealFade > 0)
         {
             float envelope = voice.StealFade / (float)FadeTail;
+            ResolveGain(ref voice, curves, segmentStart + i, out float gainLeft, out float gainRight);
             float left;
             float right;
             if (voice.Kind == RenderVoiceKind.Sine)
             {
                 float s = MathF.Sin((float)voice.Phase);
-                left = s * voice.GainLeft;
-                right = s * voice.GainRight;
+                left = s * gainLeft;
+                right = s * gainRight;
                 AdvancePhase(ref voice);
             }
             else
             {
-                ReadAsset(assets[voice.AssetIndex], ref voice, voice.GainLeft, voice.GainRight, out left, out right);
+                ReadAsset(assets[voice.AssetIndex], ref voice, gainLeft, gainRight, out left, out right);
             }
             interleaved[2 * i] += left * envelope;
             interleaved[2 * i + 1] += right * envelope;
@@ -295,6 +320,70 @@ public sealed class PlanRenderer : IPlanRenderer
         {
             voice.Active = false;
         }
+    }
+
+    /// <summary>静态声部直接取预乘增益；曲线声部 velocity × 通道断点线性插值（块内逐样本斜坡）。</summary>
+    private static void ResolveGain(ref Voice voice, GainBreakpoint[][] curves, long position,
+        out float gainLeft, out float gainRight)
+    {
+        if (voice.GainCurveIndex < 0)
+        {
+            gainLeft = voice.GainLeft;
+            gainRight = voice.GainRight;
+            return;
+        }
+        GainBreakpoint[] curve = curves[voice.GainCurveIndex];
+        AdvanceGainCursor(ref voice.GainCursor, curve, position);
+        InterpolateGain(curve, voice.GainCursor, position, out gainLeft, out gainRight);
+        gainLeft *= voice.GainLeft;
+        gainRight *= voice.GainRight;
+    }
+
+    /// <summary>游标推进；位置回退（循环回绕）时二分重定位——断点数组随 plan 预分配，零分配。</summary>
+    private static void AdvanceGainCursor(ref int cursor, GainBreakpoint[] curve, long position)
+    {
+        if (cursor > 0 && curve[cursor].Sample > position)
+        {
+            int low = 0, high = curve.Length - 1;
+            while (low < high)
+            {
+                int mid = low + (high - low + 1) / 2;
+                if (curve[mid].Sample <= position)
+                {
+                    low = mid;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
+            cursor = Math.Min(low, curve.Length - 2);
+        }
+        else
+        {
+            while (cursor + 2 < curve.Length && curve[cursor + 1].Sample <= position)
+            {
+                cursor++;
+            }
+        }
+    }
+
+    /// <summary>断点对 [cursor, cursor+1] 线性插值；t 截断到 [0,1]（时间轴末端外不外推）。</summary>
+    private static void InterpolateGain(GainBreakpoint[] curve, int cursor, long position,
+        out float gainLeft, out float gainRight)
+    {
+        if (curve.Length == 1)
+        {
+            gainLeft = curve[0].GainLeft;
+            gainRight = curve[0].GainRight;
+            return;
+        }
+        GainBreakpoint from = curve[cursor];
+        GainBreakpoint to = curve[cursor + 1];
+        long span = to.Sample - from.Sample;
+        float t = span <= 0 ? 1f : Math.Clamp((position - from.Sample) / (float)span, 0f, 1f);
+        gainLeft = from.GainLeft + (to.GainLeft - from.GainLeft) * t;
+        gainRight = from.GainRight + (to.GainRight - from.GainRight) * t;
     }
 
     private static void ReadAsset(PlanAsset asset, ref Voice voice,

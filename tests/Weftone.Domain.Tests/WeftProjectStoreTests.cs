@@ -164,6 +164,69 @@ public class WeftProjectStoreTests
             Throws.TypeOf<InvalidProjectException>().With.Message.Contains("未知 channel"));
     }
 
+    [Test]
+    public void Automation_lanes_roundtrip_through_schema()
+    {
+        var store = new WeftProjectStore();
+        var document = NewDocument();
+        AutomationLanes.Insert(document.Channels[0].VolumePoints, new AutomationPoint { Tick = 0, Value = 0.5 });
+        AutomationLanes.Insert(document.Channels[0].VolumePoints, new AutomationPoint { Tick = 192, Value = 1.25 });
+        AutomationLanes.Insert(document.Channels[0].PanPoints, new AutomationPoint { Tick = 96, Value = -0.75 });
+        AutomationLanes.Insert(document.Channels[1].VolumePoints, new AutomationPoint { Tick = 48, Value = 2.0 });
+        AutomationLanes.Insert(document.MasterVolumePoints, new AutomationPoint { Tick = 384, Value = 0.8 });
+        string package = Path.Combine(_workDir, "auto.weft");
+        store.Save(package, document, new Dictionary<string, string> { ["assets/kick.wav"] = WriteAsset() });
+
+        ProjectDocument loaded = store.Load(package).Document;
+        Assert.Multiple(() =>
+        {
+            Assert.That(loaded.Channels[0].VolumePoints.Select(p => (p.Tick, p.Value)),
+                Is.EqualTo(document.Channels[0].VolumePoints.Select(p => (p.Tick, p.Value))), "volume lane 往返等价");
+            Assert.That(loaded.Channels[0].PanPoints.Select(p => (p.Tick, p.Value)),
+                Is.EqualTo(document.Channels[0].PanPoints.Select(p => (p.Tick, p.Value))), "pan lane 往返等价");
+            Assert.That(loaded.Channels[1].VolumePoints, Has.Count.EqualTo(1));
+            Assert.That(loaded.Channels[1].PanPoints, Is.Empty, "空 lane 不写入");
+            Assert.That(loaded.MasterVolumePoints.Select(p => (p.Tick, p.Value)),
+                Is.EqualTo(document.MasterVolumePoints.Select(p => (p.Tick, p.Value))), "master lane 往返等价");
+        });
+    }
+
+    [Test]
+    public void Load_without_automation_fields_yields_empty_lanes()
+    {
+        var store = new WeftProjectStore();
+        string package = Path.Combine(_workDir, "legacy.weft");
+        store.Save(package, NewDocument(), new Dictionary<string, string> { ["assets/kick.wav"] = WriteAsset() });
+
+        ProjectDocument loaded = store.Load(package).Document;
+        Assert.Multiple(() =>
+        {
+            Assert.That(loaded.Channels[0].VolumePoints, Is.Empty);
+            Assert.That(loaded.Channels[0].PanPoints, Is.Empty);
+            Assert.That(loaded.MasterVolumePoints, Is.Empty);
+        });
+    }
+
+    [TestCase("""{"tick":192,"value":0.5},{"tick":96,"value":0.3}""", "未严格升序")]
+    [TestCase("""{"tick":96,"value":0.5},{"tick":96,"value":0.3}""", "未严格升序")]
+    [TestCase("""{"tick":96,"value":2.5}""", "值越界")]
+    [TestCase("""{"tick":-1,"value":0.5}""", "tick 越界")]
+    public void Load_rejects_invalid_volume_lane(string laneJson, string expectedError)
+    {
+        string package = Path.Combine(_workDir, "badlane.weft");
+        using (var zip = ZipFile.Open(package, ZipArchiveMode.Create))
+        {
+            Write(zip, "metadata.json", """{"schemaVersion":1,"generator":"x"}""");
+            Write(zip, "project.json", $$"""
+                {"schemaVersion":1,"tempo":140,"sampleRate":48000,
+                 "channels":[{"id":1,"name":"S","kind":"sine","volume":1.0,"pan":0.0,"volumePoints":[{{laneJson}}]}],
+                 "patterns":[],"playlist":[],"assets":[]}
+                """);
+        }
+        Assert.That(() => new WeftProjectStore().Load(package),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains(expectedError));
+    }
+
     private static void Write(ZipArchive zip, string name, string content)
     {
         ZipArchiveEntry entry = zip.CreateEntry(name);

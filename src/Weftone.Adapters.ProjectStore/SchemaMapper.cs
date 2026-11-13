@@ -17,6 +17,8 @@ internal sealed class ProjectJson
     [JsonPropertyName("tempo")] public int Tempo { get; set; }
     [JsonPropertyName("sampleRate")] public int SampleRate { get; set; }
     [JsonPropertyName("masterVolume")] public double MasterVolume { get; set; } = 1.0;
+    [JsonPropertyName("masterVolumePoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AutomationPointJson>? MasterVolumePoints { get; set; }
     [JsonPropertyName("channels")] public List<ChannelJson> Channels { get; set; } = [];
     [JsonPropertyName("patterns")] public List<PatternJson> Patterns { get; set; } = [];
     [JsonPropertyName("playlist")] public List<ClipJson> Playlist { get; set; } = [];
@@ -31,6 +33,17 @@ internal sealed class ChannelJson
     [JsonPropertyName("volume")] public double Volume { get; set; }
     [JsonPropertyName("pan")] public double Pan { get; set; }
     [JsonPropertyName("assetId")] public string? AssetId { get; set; }
+    [JsonPropertyName("volumePoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AutomationPointJson>? VolumePoints { get; set; }
+    [JsonPropertyName("panPoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AutomationPointJson>? PanPoints { get; set; }
+}
+
+/// <summary>自动化点（SPEC M2，schema v1 可选字段）：lane 内 tick 严格升序、值域随参数。</summary>
+internal sealed class AutomationPointJson
+{
+    [JsonPropertyName("tick")] public long Tick { get; set; }
+    [JsonPropertyName("value")] public double Value { get; set; }
 }
 
 internal sealed class NoteJson
@@ -74,10 +87,13 @@ internal static class SchemaMapper
             Tempo = document.Tempo,
             SampleRate = document.SampleRate,
             MasterVolume = document.MasterVolume,
+            MasterVolumePoints = MapLane(document.MasterVolumePoints),
             Channels = document.Channels.Select(c => new ChannelJson
             {
                 Id = c.Id, Name = c.Name, Kind = KindToString(c.Kind),
                 Volume = c.Volume, Pan = c.Pan, AssetId = c.AssetId,
+                VolumePoints = MapLane(c.VolumePoints),
+                PanPoints = MapLane(c.PanPoints),
             }).ToList(),
             Patterns = document.Patterns.Select(p => new PatternJson
             {
@@ -120,7 +136,13 @@ internal static class SchemaMapper
                 Pan = c.Pan,
                 AssetId = c.AssetId,
             });
+            document.Channels[^1].VolumePoints.AddRange(ParseLane(c.VolumePoints,
+                $"channel {c.Id} volumePoints", 0, 2));
+            document.Channels[^1].PanPoints.AddRange(ParseLane(c.PanPoints,
+                $"channel {c.Id} panPoints", -1, 1));
         }
+
+        document.MasterVolumePoints.AddRange(ParseLane(json.MasterVolumePoints, "masterVolumePoints", 0, 2));
 
         foreach (AssetJson a in json.Assets)
         {
@@ -185,6 +207,29 @@ internal static class SchemaMapper
         ChannelKind.Sampler => "sampler",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
+
+    /// <summary>空 lane 写 null 省略（旧文件无字段加载为空，双向兼容，SPEC M2）。</summary>
+    private static List<AutomationPointJson>? MapLane(List<AutomationPoint> points)
+        => points.Count == 0
+            ? null
+            : points.Select(p => new AutomationPointJson { Tick = p.Tick, Value = p.Value }).ToList();
+
+    private static List<AutomationPoint> ParseLane(List<AutomationPointJson>? json, string label, double min, double max)
+    {
+        var points = new List<AutomationPoint>(json?.Count ?? 0);
+        if (json is null)
+        {
+            return points;
+        }
+        foreach (AutomationPointJson p in json)
+        {
+            Require(p.Tick >= 0, $"{label} tick 越界: {p.Tick}");
+            Require(p.Value >= min && p.Value <= max, $"{label} 值越界: {p.Value}（须在 [{min}, {max}]）");
+            Require(points.Count == 0 || points[^1].Tick < p.Tick, $"{label} tick 未严格升序或重复: {p.Tick}");
+            points.Add(new AutomationPoint { Tick = p.Tick, Value = p.Value });
+        }
+        return points;
+    }
 
     private static ChannelKind ParseKind(string kind) => kind switch
     {

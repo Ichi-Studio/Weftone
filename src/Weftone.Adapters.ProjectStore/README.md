@@ -13,3 +13,8 @@ SHA256 命名去重策略留 M1b 再定。
 
 `project.json` 可选字段 `masterVolume`（M1b，缺省 1.0，读入校验 [0,2]）：
 旧包无该字段照常加载（默认 1.0），schema 版本不变（字段双向兼容）。
+
+自动化可选字段（M2，schema 版本仍为 v1）：`masterVolumePoints`、
+channel 级 `volumePoints`/`panPoints`（`{tick, value}` 数组）。
+空 lane 不写入；读入校验 tick ≥0 且严格升序、值域 volume/master [0,2]、pan [-1,1]；
+旧包无字段加载为空 lane（曲线关闭）。
