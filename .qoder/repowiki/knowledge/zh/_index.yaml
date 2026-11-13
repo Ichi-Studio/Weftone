@@ -1,0 +1,61 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-11-13T06:41:31Z"
+modules:
+    "":
+        dir_name: Weftone DAW 解决方案根
+        title: Weftone DAW 解决方案根
+        scope:
+            - README.md
+            - CONTRIBUTING.md
+            - AGENTS.md
+            - THIRD_PARTY_NOTICES.md
+            - .gitignore
+            - Weftone.slnx
+            - Directory.Build.props
+            - Directory.Packages.props
+            - .github/workflows/ci.yml
+            - LICENSE
+        source_files: []
+        children:
+            - docs_and_specs
+            - native_bindings
+            - tests
+        depends_on: []
+        related_to: []
+    docs_and_specs:
+        dir_name: Weftone 项目规格与里程碑文档
+        title: Weftone 项目规格与里程碑文档
+        scope:
+            - specs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: native_bindings
+            - path: tests
+    native_bindings:
+        dir_name: Weftone 原生音频与编解码桥接层
+        title: Weftone 原生音频与编解码桥接层
+        scope:
+            - native/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: docs_and_specs
+            - path: tests
+    tests:
+        dir_name: Weftone 测试套件（NUnit）
+        title: Weftone 测试套件（NUnit）
+        scope:
+            - tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: docs_and_specs
+            - path: native_bindings

@@ -8,6 +8,7 @@ namespace Weftone.App;
 public partial class MainWindow : Window
 {
     private DispatcherTimer? _positionTimer;
+    private DispatcherTimer? _autosaveTimer;
     private MainWindowViewModel? _subscribed;
 
     public MainWindow()
@@ -61,15 +62,20 @@ public partial class MainWindow : Window
         base.OnOpened(e);
         if (DataContext is MainWindowViewModel vm)
         {
+            vm.CheckRecoveryOnStartup();
             _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
             _positionTimer.Tick += (_, _) => vm.UpdatePosition();
             _positionTimer.Start();
+            _autosaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _autosaveTimer.Tick += (_, _) => vm.AutosaveTick();
+            _autosaveTimer.Start();
         }
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _positionTimer?.Stop();
+        _autosaveTimer?.Stop();
         base.OnClosed(e);
     }
 }

@@ -13,6 +13,16 @@
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
   </Window.KeyBindings>
   <DockPanel>
+    <Border x:Name="RecoveryBanner" DockPanel.Dock="Top" Padding="10,6" Background="#3A2E18"
+            IsVisible="{Binding HasPendingRecovery}">
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <TextBlock Text="检测到未保存的自动快照，是否恢复？"
+                   VerticalAlignment="Center" Foreground="#F0D8A0" />
+        <Button Content="恢复" Command="{Binding RestoreRecoveryCommand}" />
+        <Button Content="丢弃" Command="{Binding DiscardRecoveryCommand}" />
+      </StackPanel>
+    </Border>
+
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="工程(_F)">
         <MenuItem Header="演示工程(_D)" Command="{Binding NewDemoCommand}" />

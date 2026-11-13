@@ -27,6 +27,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly EditSession _session;
     private readonly PlaybackService _playback;
     private readonly IFileDialogService _dialogs;
+    private readonly RecoveryStore? _recovery;
     private NoteGesture _gesture;
     private Note? _gestureNote;
     private long _gestureFromTick;
@@ -64,6 +65,12 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private AutomationTargetItem? _selectedAutomationTarget;
+
+    /// <summary>启动检测到的可恢复快照（null=无提示）；恢复/丢弃后清空（SPEC M2 D4=a）。</summary>
+    [ObservableProperty]
+    private RecoverySnapshot? _pendingRecovery;
+
+    public bool HasPendingRecovery => PendingRecovery is not null;
 
     /// <summary>最近一次 BeginAddNote 创建的音符（控件手势回引用）。</summary>
     public Note? LastAddedNote { get; private set; }
@@ -173,7 +180,8 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    public MainWindowViewModel(EditSession session, PlaybackService playback, IFileDialogService dialogs)
+    public MainWindowViewModel(EditSession session, PlaybackService playback, IFileDialogService dialogs,
+        RecoveryStore? recovery = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(playback);
@@ -181,6 +189,7 @@ public partial class MainWindowViewModel : ObservableObject
         _session = session;
         _playback = playback;
         _dialogs = dialogs;
+        _recovery = recovery;
         _tempo = session.Document.Tempo;
         RefreshTitle();
     }
@@ -286,6 +295,81 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentAutomationRange));
     }
 
+    partial void OnPendingRecoveryChanged(RecoverySnapshot? value)
+        => OnPropertyChanged(nameof(HasPendingRecovery));
+
+    /// <summary>启动检测：恢复区存在快照（显式保存即清理，存在即代表未保存编辑）则提示恢复/丢弃。</summary>
+    public void CheckRecoveryOnStartup()
+    {
+        if (_recovery is null)
+        {
+            return;
+        }
+        PendingRecovery = _recovery.FindAll().FirstOrDefault();
+    }
+
+    /// <summary>恢复：从快照装载，ProjectPath 记原路径、保持脏标记；快照保留至下次保存（防二次崩溃）。</summary>
+    [RelayCommand]
+    private void RestoreRecovery()
+    {
+        RecoverySnapshot? snapshot = PendingRecovery;
+        if (snapshot is null)
+        {
+            return;
+        }
+        try
+        {
+            Stop();
+            _session.Open(snapshot.SnapshotPath, projectPathOverride: snapshot.SourceProjectPath);
+            OnDocumentReplaced();
+            PendingRecovery = null;
+            StatusText = snapshot.SourceProjectPath is null
+                ? "已恢复未保存的自动快照"
+                : $"已恢复 {Path.GetFileName(snapshot.SourceProjectPath)} 的自动快照";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException)
+        {
+            StatusText = "恢复失败：快照已损坏";
+            PendingRecovery = null;
+            _recovery?.Remove(snapshot);
+        }
+    }
+
+    /// <summary>丢弃：删除该快照，继续以当前工程启动。</summary>
+    [RelayCommand]
+    private void DiscardRecovery()
+    {
+        RecoverySnapshot? snapshot = PendingRecovery;
+        if (snapshot is null)
+        {
+            return;
+        }
+        _recovery?.Remove(snapshot);
+        PendingRecovery = null;
+        StatusText = "已丢弃自动快照";
+    }
+
+    /// <summary>View 定时器（1s）驱动：满足策略（空闲 ≥5s 或 ≥50 次编辑）则写恢复快照。</summary>
+    public void AutosaveTick()
+    {
+        if (_recovery is null || !AutosavePolicy.ShouldSnapshot(_session, DateTime.UtcNow))
+        {
+            return;
+        }
+        try
+        {
+            RecoverySnapshot snapshot = _recovery.Save(_session);
+            StatusText = $"已自动保存恢复快照（{snapshot.SavedAtUtc:HH:mm:ss}）";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            // 恢复区不可写不阻断编辑，等下一 tick 重试
+        }
+    }
+
+    /// <summary>正常退出清理全部恢复项；崩溃无此调用，快照存活供下次启动恢复。</summary>
+    public void ClearRecoveryOnExit() => _recovery?.ClearAll();
+
     partial void OnIsSongModeChanged(bool value)
     {
         if (_playback.IsPlaying)
@@ -313,6 +397,7 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
         _session.Save(path);
+        _recovery?.RemoveStale(path);
         RefreshTitle();
         StatusText = $"已保存 {Path.GetFileName(path)}";
     }

@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: native_bindings
+title: Weftone 原生音频与编解码桥接层
+scope:
+    - native/
+source_files: []
+depends_on: []
+related_to:
+    - path: docs_and_specs
+    - path: tests

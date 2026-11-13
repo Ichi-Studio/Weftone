@@ -32,13 +32,15 @@ public partial class App : Avalonia.Application
             }
 
             var playback = new PlaybackService(() => new MiniaudioBackend(), new PlanRenderer());
+            var recovery = new RecoveryStore();
             MainWindow? window = null;
             var dialogs = new FileDialogService(() => window);
-            var viewModel = new MainWindowViewModel(session, playback, dialogs);
+            var viewModel = new MainWindowViewModel(session, playback, dialogs, recovery);
             window = new MainWindow { DataContext = viewModel };
             desktop.MainWindow = window;
             desktop.Exit += (_, _) =>
             {
+                viewModel.ClearRecoveryOnExit();
                 playback.Dispose();
                 session.Dispose();
             };

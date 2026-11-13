@@ -1,0 +1,17 @@
+schema_version: 1
+module_path: ""
+title: Weftone DAW 解决方案根
+scope:
+    - README.md
+    - CONTRIBUTING.md
+    - AGENTS.md
+    - THIRD_PARTY_NOTICES.md
+    - .gitignore
+    - Weftone.slnx
+    - Directory.Build.props
+    - Directory.Packages.props
+    - .github/workflows/ci.yml
+    - LICENSE
+source_files: []
+depends_on: []
+related_to: []

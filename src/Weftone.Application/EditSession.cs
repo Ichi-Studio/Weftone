@@ -48,6 +48,28 @@ public sealed class EditSession : IDisposable
 
     public string? ProjectPath { get; private set; }
 
+    /// <summary>最近一次编辑时间（autosave 空闲判定用，SPEC M2）。</summary>
+    public DateTime? LastEditedAtUtc { get; private set; }
+
+    /// <summary>距上次快照的编辑次数（autosave 计数触发用）。</summary>
+    public int EditsSinceSnapshot { get; private set; }
+
+    public void MarkSnapshotted() => EditsSinceSnapshot = 0;
+
+    /// <summary>恢复区快照写（SPEC M2）：全量含资产，不改 ProjectPath/IsDirty。</summary>
+    public void SnapshotTo(string path)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        _store.Save(path, Document, _assetSources);
+    }
+
+    private void NoteEdited()
+    {
+        IsDirty = true;
+        LastEditedAtUtc = DateTime.UtcNow;
+        EditsSinceSnapshot++;
+    }
+
     public void NewDemo()
     {
         ResetWorkspace();
@@ -58,10 +80,11 @@ public sealed class EditSession : IDisposable
         PrepareAssets();
         History.Clear();
         ProjectPath = null;
-        IsDirty = true;
+        NoteEdited();
     }
 
-    public void Open(string path)
+    /// <summary>打开工程包。projectPathOverride 用于恢复区还原：从快照装载但记原工程路径并保持脏标记。</summary>
+    public void Open(string path, string? projectPathOverride = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         LoadedProject loaded = _store.Load(path);
@@ -79,8 +102,10 @@ public sealed class EditSession : IDisposable
         }
         PrepareAssets();
         History.Clear();
-        ProjectPath = path;
-        IsDirty = false;
+        ProjectPath = projectPathOverride ?? path;
+        IsDirty = projectPathOverride is not null;
+        EditsSinceSnapshot = projectPathOverride is not null ? 1 : 0;
+        LastEditedAtUtc = projectPathOverride is not null ? DateTime.UtcNow : null;
     }
 
     public void Save(string path)
@@ -100,7 +125,7 @@ public sealed class EditSession : IDisposable
     public void Execute(ICommand command)
     {
         History.Execute(command, Document);
-        IsDirty = true;
+        NoteEdited();
     }
 
     /// <summary>开启拖拽事务：手势内的多条命令合并为单条撤销记录。</summary>
@@ -120,13 +145,13 @@ public sealed class EditSession : IDisposable
     public void Undo()
     {
         History.Undo(Document);
-        IsDirty = true;
+        NoteEdited();
     }
 
     public void Redo()
     {
         History.Redo(Document);
-        IsDirty = true;
+        NoteEdited();
     }
 
     /// <summary>
