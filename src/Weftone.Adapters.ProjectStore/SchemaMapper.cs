@@ -37,6 +37,8 @@ internal sealed class ChannelJson
     [JsonPropertyName("pluginId")] public string? PluginId { get; set; }
     [JsonPropertyName("pluginParameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PluginParamJson>? PluginParameters { get; set; }
+    [JsonPropertyName("pluginParamPoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, List<AutomationPointJson>>? PluginParamPoints { get; set; }
     [JsonPropertyName("pluginState")] public string? PluginState { get; set; }
     [JsonPropertyName("pluginStateSha256")] public string? PluginStateSha256 { get; set; }
     [JsonPropertyName("volumePoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -117,6 +119,7 @@ internal static class SchemaMapper
                 PluginParameters = c.PluginParameters.Count == 0
                     ? null
                     : c.PluginParameters.Select(p => new PluginParamJson { Id = p.Id, Value = p.Value }).ToList(),
+                PluginParamPoints = MapPluginParamLanes(c),
                 VolumePoints = MapLane(c.VolumePoints),
                 PanPoints = MapLane(c.PanPoints),
             }).ToList(),
@@ -172,6 +175,19 @@ internal static class SchemaMapper
                 foreach (PluginParamJson param in c.PluginParameters)
                 {
                     document.Channels[^1].PluginParameters.Add(new PluginParameterValue(param.Id, param.Value));
+                }
+            }
+            if (c.PluginParamPoints is not null)
+            {
+                foreach (KeyValuePair<string, List<AutomationPointJson>> lane in c.PluginParamPoints)
+                {
+                    if (!uint.TryParse(lane.Key, out uint paramId))
+                    {
+                        throw new InvalidProjectException($"channel {c.Id} 插件参数 id 非法: {lane.Key}");
+                    }
+                    List<AutomationPoint> points = document.Channels[^1].GetPluginParamPoints(paramId);
+                    points.AddRange(ParseLane(lane.Value,
+                        $"channel {c.Id} pluginParamPoints[{paramId}]", double.MinValue, double.MaxValue));
                 }
             }
             document.Channels[^1].VolumePoints.AddRange(ParseLane(c.VolumePoints,
@@ -269,6 +285,24 @@ internal static class SchemaMapper
         ChannelKind.Plugin => "plugin",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
+
+    /// <summary>插件参数自动化 lane：paramId 字符串键 → 点（空通道省略，竖切 4）。</summary>
+    private static Dictionary<string, List<AutomationPointJson>>? MapPluginParamLanes(Channel channel)
+    {
+        Dictionary<string, List<AutomationPointJson>>? lanes = null;
+        foreach (uint paramId in channel.AutomatedPluginParamIds)
+        {
+            List<AutomationPoint> points = channel.GetPluginParamPoints(paramId);
+            if (points.Count == 0)
+            {
+                continue;
+            }
+            lanes ??= [];
+            lanes[paramId.ToString(System.Globalization.CultureInfo.InvariantCulture)] =
+                points.Select(p => new AutomationPointJson { Tick = p.Tick, Value = p.Value }).ToList();
+        }
+        return lanes;
+    }
 
     /// <summary>空 lane 写 null 省略（旧文件无字段加载为空，双向兼容，SPEC M2）。</summary>
     private static List<AutomationPointJson>? MapLane(List<AutomationPoint> points)

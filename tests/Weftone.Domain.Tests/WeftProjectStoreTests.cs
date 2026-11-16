@@ -253,6 +253,25 @@ public class WeftProjectStoreTests
     }
 
     [Test]
+    public void Plugin_param_lanes_roundtrip_through_schema()
+    {
+        var store = new WeftProjectStore();
+        var document = NewDocument();
+        document.Plugins.Add(new PluginRef { Id = "p", Path = "p.clap" });
+        document.Channels.Add(new Channel { Id = 3, Kind = ChannelKind.Plugin, PluginId = "p" });
+        List<AutomationPoint> lane = document.Channels[^1].GetPluginParamPoints(7);
+        AutomationLanes.Insert(lane, new AutomationPoint { Tick = 0, Value = 0.25 });
+        AutomationLanes.Insert(lane, new AutomationPoint { Tick = 192, Value = 0.75 });
+        string package = Path.Combine(_workDir, "paramlane.weft");
+        store.Save(package, document, new Dictionary<string, string> { ["assets/kick.wav"] = WriteAsset() });
+
+        ProjectDocument loaded = store.Load(package).Document;
+        List<AutomationPoint> restored = loaded.Channels.Single(c => c.Id == 3).GetPluginParamPoints(7);
+        Assert.That(restored.Select(p => (p.Tick, p.Value)),
+            Is.EqualTo(new (long, double)[] { (0, 0.25), (192, 0.75) }));
+    }
+
+    [Test]
     public void Load_rejects_unknown_plugin_reference()
     {
         string package = Path.Combine(_workDir, "badplugin.weft");

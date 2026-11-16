@@ -238,6 +238,11 @@ public class GoldenAudioTests
         pattern.Notes.Add(new Note { ChannelId = 1, Tick = 384, Key = 72, Velocity = 0.7, LengthTicks = 96 });
         pattern.Notes.Add(new Note { ChannelId = 2, Tick = 192, Key = 69, Velocity = 0.8, LengthTicks = 96 });
         document.Patterns.Add(pattern);
+        // 竖切 4：插件参数自动化——gain 0.05→0.6→0.2 阶梯事件（覆盖静态 0.25）
+        List<AutomationPoint> gainLane = document.Channels[0].GetPluginParamPoints(1);
+        AutomationLanes.Insert(gainLane, new AutomationPoint { Tick = 0, Value = 0.05 });
+        AutomationLanes.Insert(gainLane, new AutomationPoint { Tick = 240, Value = 0.6 });
+        AutomationLanes.Insert(gainLane, new AutomationPoint { Tick = 720, Value = 0.2 });
         document.Playlist.Add(new Clip { PatternId = 10, StartTick = 0 });
         document.Playlist.Add(new Clip { PatternId = 10, StartTick = 480 });
         return document;

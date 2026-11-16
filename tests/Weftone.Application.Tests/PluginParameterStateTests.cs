@@ -56,7 +56,7 @@ public class PluginParameterStateTests
 
         var left = new float[64];
         var right = new float[64];
-        plugin.Process(left, right, [new PluginNoteEvent(PluginNoteEventKind.On, 0, 69, 0, 1f)]);
+        plugin.Process(left, right, [new PluginEvent(PluginEventKind.NoteOn, 0, 69, 0, 1f, 0, 0)]);
         plugin.Process(left, right, []);
         float before = Math.Abs(left[10]);
         Assert.That(before, Is.GreaterThan(0.1f), "默认 gain=0.25 出声");

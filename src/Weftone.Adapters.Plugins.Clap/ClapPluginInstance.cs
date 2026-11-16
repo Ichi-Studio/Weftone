@@ -13,7 +13,7 @@ public sealed class ClapPluginInstance : IAudioPluginInstance
 
     private nint _instance;
     private readonly double _sampleRate;
-    private readonly ClapBridgeNative.NoteEventNative[] _scratch = new ClapBridgeNative.NoteEventNative[MaxEventsPerBlock];
+    private readonly ClapBridgeNative.EventNative[] _scratch = new ClapBridgeNative.EventNative[MaxEventsPerBlock];
 
     private ClapPluginInstance(nint instance, double sampleRate)
     {
@@ -42,7 +42,7 @@ public sealed class ClapPluginInstance : IAudioPluginInstance
             : new ClapPluginInstance(handle, sampleRate);
     }
 
-    public unsafe void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginNoteEvent> events)
+    public unsafe void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginEvent> events)
     {
         nint instance = _instance;
         ObjectDisposedException.ThrowIf(instance == 0, this);
@@ -53,14 +53,16 @@ public sealed class ClapPluginInstance : IAudioPluginInstance
         int count = Math.Min(events.Length, _scratch.Length);
         for (int i = 0; i < count; i++)
         {
-            PluginNoteEvent source = events[i];
-            _scratch[i] = new ClapBridgeNative.NoteEventNative
+            PluginEvent source = events[i];
+            _scratch[i] = new ClapBridgeNative.EventNative
             {
                 Frame = source.FrameOffset,
-                IsOn = source.Kind == PluginNoteEventKind.On ? 1 : 0,
+                Kind = (int)source.Kind,
                 Key = source.Key,
                 Channel = source.Channel,
                 Velocity = source.Velocity,
+                ParamId = source.ParamId,
+                Value = source.ParamValue,
             };
         }
         ClapBridgeNative.ProcessInstance(instance, left, right, _scratch.AsSpan(0, count));

@@ -31,7 +31,7 @@ public sealed class PlanRenderer : IPlanRenderer
         public RenderPlan? Plan;
         public IAudioPluginInstance[] Plugins = [];
         /// <summary>每槽事件 scratch（表构造线程预分配，音频线程只写不扩）。</summary>
-        public PluginNoteEvent[][] Scratch = [];
+        public PluginEvent[][] Scratch = [];
         /// <summary>每槽最近通道增益（note off 后的 release 尾巴沿用；同通道同值）。</summary>
         public float[] SlotGainLeft = [];
         public float[] SlotGainRight = [];
@@ -47,6 +47,14 @@ public sealed class PlanRenderer : IPlanRenderer
         public float Velocity;
         public float GainLeft;
         public float GainRight;
+    }
+
+    private struct SegmentParamEvent
+    {
+        public int Slot;
+        public uint ParamId;
+        public long Sample;
+        public double Value;
     }
 
     private struct Voice
@@ -70,6 +78,9 @@ public sealed class PlanRenderer : IPlanRenderer
     private readonly Voice[] _pool = new Voice[MaxVoices];
     private readonly RenderVoice[] _pending = new RenderVoice[PendingCapacity];
     private readonly PluginVoice[] _pluginNotes = new PluginVoice[MaxActivePluginNotes];
+    private readonly SegmentParamEvent[] _segmentParamEvents = new SegmentParamEvent[MaxActivePluginNotes];
+    private int _segmentParamEventCount;
+    private int _nextParamEvent;
     private readonly float[] _pluginLeft = new float[PluginChunkFrames];
     private readonly float[] _pluginRight = new float[PluginChunkFrames];
     private int _pendingHead;
@@ -94,6 +105,8 @@ public sealed class PlanRenderer : IPlanRenderer
         _state = BuildState(plan, plugins ?? []);
         _position = 0;
         _pluginNoteCount = 0;
+        _segmentParamEventCount = 0;
+        _nextParamEvent = 0;
         DroppedEvents = 0;
         Array.Clear(_pool);
         ResyncCursor(plan);
@@ -115,13 +128,13 @@ public sealed class PlanRenderer : IPlanRenderer
         {
             Plan = plan,
             Plugins = [.. plugins],
-            Scratch = new PluginNoteEvent[plugins.Count][],
+            Scratch = new PluginEvent[plugins.Count][],
             SlotGainLeft = new float[plugins.Count],
             SlotGainRight = new float[plugins.Count],
         };
         for (int i = 0; i < plugins.Count; i++)
         {
-            state.Scratch[i] = new PluginNoteEvent[PluginChunkFrames];
+            state.Scratch[i] = new PluginEvent[PluginChunkFrames];
             state.SlotGainLeft[i] = 1f;
             state.SlotGainRight[i] = 1f;
         }
@@ -160,6 +173,7 @@ public sealed class PlanRenderer : IPlanRenderer
                     _position = _loopStart;
                     _nextEvent = 0;
                     _pluginNoteCount = 0;
+                    _nextParamEvent = 0;
                     tillEnd = _loopEnd - _position;
                 }
                 if (tillEnd > 0 && tillEnd < segment)
@@ -197,12 +211,31 @@ public sealed class PlanRenderer : IPlanRenderer
         {
             _masterGainCursor = 0;
         }
-        RenderVoice[] voices = plan.Voices;
+        _nextEvent = LowerBoundVoice(plan.Voices, _position);
+        RenderPluginParamEvent[] paramEvents = plan.PluginParamEvents;
+        int plow = 0, phigh = paramEvents.Length;
+        while (plow < phigh)
+        {
+            int mid = plow + (phigh - plow) / 2;
+            if (paramEvents[mid].Sample < _position)
+            {
+                plow = mid + 1;
+            }
+            else
+            {
+                phigh = mid;
+            }
+        }
+        _nextParamEvent = plow;
+    }
+
+    private static int LowerBoundVoice(RenderVoice[] voices, long position)
+    {
         int low = 0, high = voices.Length;
         while (low < high)
         {
             int mid = low + (high - low) / 2;
-            if (voices[mid].StartSample < _position)
+            if (voices[mid].StartSample < position)
             {
                 low = mid + 1;
             }
@@ -211,7 +244,7 @@ public sealed class PlanRenderer : IPlanRenderer
                 high = mid;
             }
         }
-        _nextEvent = low;
+        return low;
     }
 
     private void RenderSegment(State state, RenderPlan plan, Span<float> interleaved, int offsetFrames, int frames)
@@ -268,6 +301,29 @@ public sealed class PlanRenderer : IPlanRenderer
             }
         }
 
+        // 参数事件点（竖切 4）：本段窗口内事件收集，段内按 chunk 派发
+        _segmentParamEventCount = 0;
+        RenderPluginParamEvent[] paramEvents = plan.PluginParamEvents;
+        while (_nextParamEvent < paramEvents.Length && paramEvents[_nextParamEvent].Sample < end)
+        {
+            if (_segmentParamEventCount < _segmentParamEvents.Length)
+            {
+                RenderPluginParamEvent source = paramEvents[_nextParamEvent];
+                _segmentParamEvents[_segmentParamEventCount++] = new SegmentParamEvent
+                {
+                    Slot = source.Slot,
+                    ParamId = source.ParamId,
+                    Sample = source.Sample,
+                    Value = source.Value,
+                };
+            }
+            else
+            {
+                DroppedEvents++;
+            }
+            _nextParamEvent++;
+        }
+
         RenderPluginSegment(state, slice, frames, segmentStart);
 
         if (plan.MasterGainCurve is { } masterCurve)
@@ -308,7 +364,7 @@ public sealed class PlanRenderer : IPlanRenderer
 
             for (int slot = 0; slot < state.Plugins.Length; slot++)
             {
-                PluginNoteEvent[] scratch = state.Scratch[slot];
+                PluginEvent[] scratch = state.Scratch[slot];
                 int count = 0;
                 bool slotActive = false;
                 float gainLeft = state.SlotGainLeft[Math.Min(slot, state.SlotGainLeft.Length - 1)];
@@ -329,14 +385,25 @@ public sealed class PlanRenderer : IPlanRenderer
                     }
                     if (note.Start >= chunkStart && note.Start < chunkEnd)
                     {
-                        scratch[count++] = new PluginNoteEvent(
-                            PluginNoteEventKind.On, (int)(note.Start - chunkStart), note.Key, note.Channel, note.Velocity);
+                        scratch[count++] = new PluginEvent(
+                            PluginEventKind.NoteOn, (int)(note.Start - chunkStart), note.Key, note.Channel, note.Velocity, 0, 0);
                     }
                     if (note.End > chunkStart && note.End < chunkEnd && count < scratch.Length)
                     {
-                        scratch[count++] = new PluginNoteEvent(
-                            PluginNoteEventKind.Off, (int)(note.End - chunkStart), note.Key, note.Channel, 0f);
+                        scratch[count++] = new PluginEvent(
+                            PluginEventKind.NoteOff, (int)(note.End - chunkStart), note.Key, note.Channel, 0f, 0, 0);
                     }
+                }
+                for (int i = 0; i < _segmentParamEventCount && count < scratch.Length; i++)
+                {
+                    SegmentParamEvent param = _segmentParamEvents[i];
+                    if (param.Slot != slot || param.Sample < chunkStart || param.Sample >= chunkEnd)
+                    {
+                        continue;
+                    }
+                    slotActive = true;
+                    scratch[count++] = new PluginEvent(
+                        PluginEventKind.ParamValue, (int)(param.Sample - chunkStart), 0, 0, 0f, param.ParamId, param.Value);
                 }
                 if (!slotActive)
                 {
@@ -375,11 +442,11 @@ public sealed class PlanRenderer : IPlanRenderer
     }
 
     /// <summary>CLAP 要求事件按帧升序：on 序与 off 序各自有序，插入排序归并（每块事件数小）。</summary>
-    private static void SortPluginEvents(PluginNoteEvent[] events, int count)
+    private static void SortPluginEvents(PluginEvent[] events, int count)
     {
         for (int i = 1; i < count; i++)
         {
-            PluginNoteEvent key = events[i];
+            PluginEvent key = events[i];
             int j = i - 1;
             while (j >= 0 && events[j].FrameOffset > key.FrameOffset)
             {

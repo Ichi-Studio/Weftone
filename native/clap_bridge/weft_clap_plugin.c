@@ -32,14 +32,17 @@ static void weft_unload(weft_lib_t lib) { dlclose(lib); }
 #define WEFT_MAX_PARAMS 64
 #define WEFT_STATE_SCRATCH (4 * 1024 * 1024)
 
-// 与 C# WeftNoteEventNative 布局对齐（4 字节对齐，size 20）
+// 与 C# WeftEventNative 布局对齐（8 字节对齐，size 32）
+// kind：0=note off，1=note on，2=param value（竖切 4）
 typedef struct {
     int32_t frame;
-    int32_t is_on;
+    int32_t kind;
     int32_t key;
     int32_t channel;
     float velocity;
-} weft_clap_note_t;
+    uint32_t param_id;
+    double value;
+} weft_clap_event_t;
 
 // 与 C# WeftParamInfoNative 布局对齐
 typedef struct {
@@ -251,7 +254,7 @@ fail:
 // RT 路径：零分配；note 事件按 frame 升序、超出容量的尾部丢弃；
 // pending 参数（竖切 3 SetParameter）于块头以 PARAM_VALUE(frame 0) 派发后清空
 WEFT_EXPORT void weft_clap_plugin_process(void* handle, float* left, float* right, int32_t frames,
-                                          const weft_clap_note_t* events, int32_t count)
+                                          const weft_clap_event_t* events, int32_t count)
 {
     weft_clap_instance_t* self = (weft_clap_instance_t*)handle;
     if (!self || !self->plugin || frames <= 0) {
@@ -278,11 +281,26 @@ WEFT_EXPORT void weft_clap_plugin_process(void* handle, float* left, float* righ
         self->pending_param_count = 0;
     }
     for (int32_t i = 0; i < count && i < WEFT_MAX_EVENTS; i++) {
+        if (events[i].kind == 2) {
+            clap_event_param_value_t* param = (clap_event_param_value_t*)&self->events[self->event_count++];
+            memset(param, 0, sizeof *param);
+            param->header.time = (uint32_t)(events[i].frame < 0 ? 0 : events[i].frame);
+            param->header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            param->header.type = CLAP_EVENT_PARAM_VALUE;
+            param->header.size = (uint32_t)sizeof(clap_event_param_value_t);
+            param->param_id = events[i].param_id;
+            param->value = events[i].value;
+            param->note_id = -1;
+            param->port_index = -1;
+            param->channel = -1;
+            param->key = -1;
+            continue;
+        }
         clap_event_note_t* note = &self->events[self->event_count++];
         memset(note, 0, sizeof *note);
         note->header.time = (uint32_t)(events[i].frame < 0 ? 0 : events[i].frame);
         note->header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-        note->header.type = events[i].is_on ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF;
+        note->header.type = events[i].kind == 1 ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF;
         note->header.size = (uint32_t)sizeof(clap_event_note_t);
         note->note_id = -1;
         note->port_index = -1;

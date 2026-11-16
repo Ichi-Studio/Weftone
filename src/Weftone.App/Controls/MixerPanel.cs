@@ -174,7 +174,10 @@ public sealed class MixerPanel : ContentControl
             foreach (PluginParameterInfo parameter in vm.GetPluginParameters(channel).Take(4))
             {
                 PluginParameterValue? stored = channel.PluginParameters.FirstOrDefault(p => p.Id == parameter.Id);
-                double current = stored?.Value ?? parameter.DefaultValue;
+                bool automated = channel.GetPluginParamPoints(parameter.Id).Count > 0;
+                double current = automated
+                    ? vm.GetPluginParamDisplayValue(channel, parameter.Id, stored?.Value ?? parameter.DefaultValue)
+                    : stored?.Value ?? parameter.DefaultValue;
                 var slider = new Slider
                 {
                     Orientation = Orientation.Horizontal,
@@ -182,14 +185,25 @@ public sealed class MixerPanel : ContentControl
                     Maximum = parameter.MaxValue,
                     Value = current,
                     Width = 76,
+                    IsEnabled = !automated,
                 };
                 var label = new TextBlock
                 {
-                    Text = $"{parameter.Name} {current:0.###}",
+                    Text = automated ? $"A {parameter.Name} {current:0.###}" : $"{parameter.Name} {current:0.###}",
                     FontSize = 10,
                     Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0xF0, 0xE0)),
                     TextAlignment = TextAlignment.Center,
                 };
+                if (automated)
+                {
+                    _autoValueUpdaters.Add(() =>
+                    {
+                        double value = vm.GetPluginParamDisplayValue(
+                            channel, parameter.Id, stored?.Value ?? parameter.DefaultValue);
+                        slider.Value = value;
+                        label.Text = $"A {parameter.Name} {value:0.###}";
+                    });
+                }
                 bool dragging = false;
                 slider.AddHandler(PointerPressedEvent, (_, _) =>
                 {

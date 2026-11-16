@@ -66,7 +66,7 @@ public static class ClapBridgeNative
 
     [DllImport(LibName)]
     private static unsafe extern void weft_clap_plugin_process(
-        nint instance, float* left, float* right, int frames, NoteEventNative* events, int count);
+        nint instance, float* left, float* right, int frames, EventNative* events, int count);
 
     [DllImport(LibName)]
     private static extern uint weft_clap_plugin_param_count(nint instance);
@@ -103,13 +103,15 @@ public static class ClapBridgeNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct NoteEventNative
+    internal struct EventNative
     {
         public int Frame;
-        public int IsOn;
+        public int Kind; // 0=off 1=on 2=param
         public int Key;
         public int Channel;
         public float Velocity;
+        public uint ParamId;
+        public double Value;
     }
 
     /// <summary>创建已激活并进入处理态的 CLAP 实例；失败返回 0（加载/id 不符/端口契约不符）。</summary>
@@ -120,11 +122,11 @@ public static class ClapBridgeNative
     }
 
     internal static unsafe void ProcessInstance(nint instance, Span<float> left, Span<float> right,
-        ReadOnlySpan<NoteEventNative> events)
+        ReadOnlySpan<EventNative> events)
     {
         fixed (float* l = left)
         fixed (float* r = right)
-        fixed (NoteEventNative* e = events)
+        fixed (EventNative* e = events)
         {
             weft_clap_plugin_process(instance, l, r, left.Length, e, events.Length);
         }

@@ -4,23 +4,31 @@ public enum AutomationParameter
 {
     Volume,
     Pan,
+    /// <summary>插件参数自动化（SPEC M3 竖切 4）：PluginParamId 标识参数，值域由插件定义（宽松校验）。</summary>
+    PluginParam,
 }
 
-/// <summary>自动化目标：普通通道或主控（master 仅有 volume，SPEC M2 D3=a）。</summary>
+/// <summary>自动化目标：普通通道（vol/pan/插件参数）或主控（master 仅有 volume）。</summary>
 public readonly record struct AutomationTarget
 {
     public bool IsMaster { get; }
     public int ChannelId { get; }
+    /// <summary>AutomationParameter == PluginParam 时有效。</summary>
+    public uint PluginParamId { get; }
 
-    private AutomationTarget(bool isMaster, int channelId)
+    private AutomationTarget(bool isMaster, int channelId, uint pluginParamId)
     {
         IsMaster = isMaster;
         ChannelId = channelId;
+        PluginParamId = pluginParamId;
     }
 
-    public static AutomationTarget Master { get; } = new(true, 0);
+    public static AutomationTarget Master { get; } = new(true, 0, 0);
 
-    public static AutomationTarget Channel(int channelId) => new(false, channelId);
+    public static AutomationTarget Channel(int channelId) => new(false, channelId, 0);
+
+    public static AutomationTarget PluginParameter(int channelId, uint paramId) =>
+        new(false, channelId, paramId);
 
     public override string ToString() => IsMaster ? "master" : $"ch{ChannelId}";
 }
@@ -38,15 +46,17 @@ public struct AutomationPoint
 /// </summary>
 public static class AutomationLanes
 {
-    /// <summary>值域：volume/master [0,2]，pan [-1,1]（与混音参数一致）。</summary>
+    /// <summary>值域：volume/master [0,2]，pan [-1,1]；插件参数由插件定义——
+    /// Domain 层无描述，用宽松有限值域（严格 clamp 留编译/UI 层按描述执行）。</summary>
     public static (double Min, double Max) Range(AutomationParameter parameter) => parameter switch
     {
         AutomationParameter.Volume => (0.0, 2.0),
         AutomationParameter.Pan => (-1.0, 1.0),
+        AutomationParameter.PluginParam => (-1e9, 1e9),
         _ => throw new ArgumentOutOfRangeException(nameof(parameter)),
     };
 
-    /// <summary>master 仅有 volume；master+pan 视为建模错误。</summary>
+    /// <summary>master 仅有 volume；master+pan/插件参数视为建模错误。</summary>
     public static bool Supports(AutomationTarget target, AutomationParameter parameter) =>
         !target.IsMaster || parameter == AutomationParameter.Volume;
 
@@ -62,6 +72,10 @@ public static class AutomationLanes
         }
         Channel channel = document.Channels.FirstOrDefault(c => c.Id == target.ChannelId)
             ?? throw new InvalidOperationException($"channel {target.ChannelId} 不存在");
+        if (parameter == AutomationParameter.PluginParam)
+        {
+            return channel.GetPluginParamPoints(target.PluginParamId);
+        }
         return parameter == AutomationParameter.Volume ? channel.VolumePoints : channel.PanPoints;
     }
 

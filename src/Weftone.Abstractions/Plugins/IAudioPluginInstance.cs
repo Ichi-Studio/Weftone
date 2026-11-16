@@ -1,14 +1,22 @@
 namespace Weftone.Abstractions.Plugins;
 
-public enum PluginNoteEventKind : byte
+public enum PluginEventKind : byte
 {
-    On = 0,
-    Off = 1,
+    NoteOff = 0,
+    NoteOn = 1,
+    /// <summary>参数值变化（SPEC M3 竖切 4 D6：编译期确定性事件点）。</summary>
+    ParamValue = 2,
 }
 
-/// <summary>插件音符事件（frame 相对当次 process 块起点，升序由编译产物保证）。</summary>
-public readonly record struct PluginNoteEvent(
-    PluginNoteEventKind Kind, int FrameOffset, int Key, int Channel, float Velocity);
+/// <summary>插件事件（frame 相对当次 process 块起点，升序由编译产物保证）。</summary>
+public readonly record struct PluginEvent(
+    PluginEventKind Kind,
+    int FrameOffset,
+    int Key,
+    int Channel,
+    float Velocity,
+    uint ParamId,
+    double ParamValue);
 
 /// <summary>插件参数描述（竖切 3）：id/name/值域/默认值/可自动化标志（自动化用，竖切 4）。</summary>
 public sealed record PluginParameterInfo(
@@ -31,7 +39,7 @@ public interface IAudioPluginInstance : IDisposable
     /// <summary>参数描述（创建时快照）。</summary>
     IReadOnlyList<PluginParameterInfo> Parameters { get; }
 
-    void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginNoteEvent> events);
+    void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginEvent> events);
 
     void SetParameter(uint paramId, double value);
 

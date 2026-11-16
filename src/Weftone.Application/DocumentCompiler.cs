@@ -44,6 +44,8 @@ public sealed class DocumentCompiler
         var curveIndexByChannel = new Dictionary<int, int>();
         GainBreakpoint[][] curves = BuildChannelCurves(document, totalTicks, num, den, curveIndexByChannel);
         Dictionary<int, int> pluginSlotByChannel = BuildPluginSlots(document, out PlanPluginSlot[] pluginSlots);
+        RenderPluginParamEvent[] pluginParamEvents =
+            BuildPluginParamEvents(document, pluginSlotByChannel, totalTicks, num, den);
         var voices = new List<RenderVoice>();
         foreach (Clip clip in document.Playlist.OrderBy(c => c.StartTick))
         {
@@ -56,7 +58,7 @@ public sealed class DocumentCompiler
                 curveIndexByChannel, pluginSlotByChannel, num, den, voices);
         }
         return BuildPlan(document, assets, voices, totalTicks, loop: false, num, den, curves,
-            BuildMasterCurve(document, totalTicks, num, den), pluginSlots);
+            BuildMasterCurve(document, totalTicks, num, den), pluginSlots, pluginParamEvents);
     }
 
     /// <summary>Pattern 模式：单个 Pattern 从 0 展开为声部，循环区间 = [0, 长度)，长度按小节向上取整（至少 1 小节）。</summary>
@@ -73,10 +75,12 @@ public sealed class DocumentCompiler
         var curveIndexByChannel = new Dictionary<int, int>();
         GainBreakpoint[][] curves = BuildChannelCurves(document, lengthTicks, num, den, curveIndexByChannel);
         Dictionary<int, int> pluginSlotByChannel = BuildPluginSlots(document, out PlanPluginSlot[] pluginSlots);
+        RenderPluginParamEvent[] pluginParamEvents =
+            BuildPluginParamEvents(document, pluginSlotByChannel, lengthTicks, num, den);
         var voices = new List<RenderVoice>();
         AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, num, den, voices);
         return BuildPlan(document, assets, voices, lengthTicks, loop: true, num, den, curves,
-            BuildMasterCurve(document, lengthTicks, num, den), pluginSlots);
+            BuildMasterCurve(document, lengthTicks, num, den), pluginSlots, pluginParamEvents);
     }
 
     /// <summary>Pattern 循环长度：最大音符结束 tick 向上取整到小节，至少 1 小节（4 拍）。</summary>
@@ -135,6 +139,53 @@ public sealed class DocumentCompiler
         }
         slots = [.. list];
         return slotByChannel;
+    }
+
+    /// <summary>插件参数 lane → 事件点（SPEC M3 竖切 4 D6）：sample 0 注入首值（clamp），
+    /// 其后每点一事件（阶梯语义——点间斜坡/逐块插值密度留 M5 打磨，SPEC 风险记录）；
+    /// 按 Sample 升序、平局按 (Slot, ParamId) 稳定排序。</summary>
+    private static RenderPluginParamEvent[] BuildPluginParamEvents(
+        ProjectDocument document, Dictionary<int, int> pluginSlotByChannel, long totalTicks, long num, long den)
+    {
+        var events = new List<RenderPluginParamEvent>();
+        foreach (Channel channel in document.Channels)
+        {
+            if (channel.Kind != ChannelKind.Plugin || !pluginSlotByChannel.TryGetValue(channel.Id, out int slot))
+            {
+                continue;
+            }
+            foreach (uint paramId in channel.AutomatedPluginParamIds)
+            {
+                List<AutomationPoint> lane = channel.GetPluginParamPoints(paramId);
+                if (lane.Count == 0)
+                {
+                    continue;
+                }
+                events.Add(new RenderPluginParamEvent
+                {
+                    Slot = slot,
+                    ParamId = paramId,
+                    Sample = 0,
+                    Value = lane[0].Value,
+                });
+                foreach (AutomationPoint point in lane)
+                {
+                    long sample = TickMath.TicksToSamples(point.Tick, num, den);
+                    if (sample <= 0)
+                    {
+                        continue; // 首点已由 sample 0 事件覆盖
+                    }
+                    events.Add(new RenderPluginParamEvent
+                    {
+                        Slot = slot,
+                        ParamId = paramId,
+                        Sample = sample,
+                        Value = point.Value,
+                    });
+                }
+            }
+        }
+        return [.. events.OrderBy(e => e.Sample).ThenBy(e => e.Slot).ThenBy(e => e.ParamId)];
     }
 
     private static void AddPatternVoices(Pattern pattern, long startTickOffset,
@@ -289,7 +340,7 @@ public sealed class DocumentCompiler
     private static RenderPlan BuildPlan(ProjectDocument document, IReadOnlyList<PreparedAsset> assets,
         List<RenderVoice> voices, long totalTicks, bool loop, long num, long den,
         GainBreakpoint[][] channelGainCurves, GainBreakpoint[]? masterGainCurve,
-        PlanPluginSlot[] pluginSlots)
+        PlanPluginSlot[] pluginSlots, RenderPluginParamEvent[] pluginParamEvents)
     {
         RenderVoice[] sorted = voices.OrderBy(v => v.StartSample).ToArray();
         var planAssets = new PlanAsset[assets.Count];
@@ -316,6 +367,7 @@ public sealed class DocumentCompiler
             ChannelGainCurves = channelGainCurves,
             MasterGainCurve = masterGainCurve,
             PluginSlots = pluginSlots,
+            PluginParamEvents = pluginParamEvents,
         };
     }
 }

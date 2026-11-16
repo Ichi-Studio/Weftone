@@ -22,8 +22,10 @@ public partial class MainWindowViewModel : ObservableObject
         Resize,
     }
 
-    /// <summary>自动化 lane 目标项（SPEC M2 D3=a：通道 volume/pan + master volume）。</summary>
-    public sealed record AutomationTargetItem(AutomationTarget Target, AutomationParameter Parameter, string Label);
+    /// <summary>自动化 lane 目标项（SPEC M2 D3=a + M3 竖切 4 插件参数）；
+    /// 插件参数带描述值域（Min/Max），其余走 AutomationLanes.Range。</summary>
+    public sealed record AutomationTargetItem(
+        AutomationTarget Target, AutomationParameter Parameter, string Label, double? Min = null, double? Max = null);
 
     private readonly EditSession _session;
     private readonly PlaybackService _playback;
@@ -107,6 +109,20 @@ public partial class MainWindowViewModel : ObservableObject
                     AutomationTarget.Channel(channel.Id), AutomationParameter.Volume, $"{label} · 音量"));
                 targets.Add(new AutomationTargetItem(
                     AutomationTarget.Channel(channel.Id), AutomationParameter.Pan, $"{label} · 声像"));
+                if (channel.Kind == ChannelKind.Plugin && _pluginCatalog is not null)
+                {
+                    foreach (PluginParameterInfo parameter in GetPluginParameters(channel))
+                    {
+                        if (!parameter.IsAutomatable)
+                        {
+                            continue;
+                        }
+                        targets.Add(new AutomationTargetItem(
+                            AutomationTarget.PluginParameter(channel.Id, parameter.Id),
+                            AutomationParameter.PluginParam,
+                            $"{label} · {parameter.Name}", parameter.MinValue, parameter.MaxValue));
+                    }
+                }
             }
             targets.Add(new AutomationTargetItem(
                 AutomationTarget.Master, AutomationParameter.Volume, "Master · 音量"));
@@ -128,10 +144,13 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    /// <summary>当前 lane 值域（volume [0,2]、pan [-1,1]）。</summary>
-    public (double Min, double Max) CurrentAutomationRange => SelectedAutomationTarget is null
-        ? (0, 1)
-        : AutomationLanes.Range(SelectedAutomationTarget.Parameter);
+    /// <summary>当前 lane 值域（volume [0,2]、pan [-1,1]、插件参数取描述值域）。</summary>
+    public (double Min, double Max) CurrentAutomationRange => SelectedAutomationTarget switch
+    {
+        { Min: { } min, Max: { } max } => (min, max),
+        { Parameter: AutomationParameter parameter } => AutomationLanes.Range(parameter),
+        _ => (0, 1),
+    };
 
     /// <summary>自动化手势拖动中的点 tick（null=无手势）；控件高亮用。</summary>
     public long? AutomationLiveTick => _autoGesture ? _autoLiveTick : null;
@@ -159,6 +178,10 @@ public partial class MainWindowViewModel : ObservableObject
     public double GetMasterAutomationDisplayValue()
         => AutomationMath.Evaluate(
             _session.Document.MasterVolumePoints, _session.Document.MasterVolume, PlayheadTick);
+
+    /// <summary>插件参数显示值（Mixer 参数面板只读显示，竖切 4）：lane 有曲线按播放头求值。</summary>
+    public double GetPluginParamDisplayValue(Channel channel, uint paramId, double fallback)
+        => AutomationMath.Evaluate(channel.GetPluginParamPoints(paramId), fallback, PlayheadTick);
 
     /// <summary>master 是否带自动化曲线（Mixer 只读推子判定）。</summary>
     public bool HasMasterAutomation => _session.Document.MasterVolumePoints.Count > 0;
@@ -283,6 +306,12 @@ public partial class MainWindowViewModel : ObservableObject
             && current.Target.IsMaster)
         {
             return; // master 永远有效
+        }
+        if (current is not null
+            && _session.Document.Channels.Any(c => c.Id == current.Target.ChannelId))
+        {
+            OnPropertyChanged(nameof(AutomationTargets));
+            return; // 通道仍在：列表刷新但选中保持
         }
         IReadOnlyList<AutomationTargetItem> targets = AutomationTargets;
         if (current is null || !targets.Any(t => t.Target == current.Target && t.Parameter == current.Parameter))

@@ -30,11 +30,11 @@ public class ClapPluginInstanceTests
         }
     }
 
-    private static PluginNoteEvent On(int frame, int key, float velocity = 1f) =>
-        new(PluginNoteEventKind.On, frame, key, 0, velocity);
+    private static PluginEvent On(int frame, int key, float velocity = 1f) =>
+        new(PluginEventKind.NoteOn, frame, key, 0, velocity, 0, 0);
 
-    private static PluginNoteEvent Off(int frame, int key) =>
-        new(PluginNoteEventKind.Off, frame, key, 0, 0f);
+    private static PluginEvent Off(int frame, int key) =>
+        new(PluginEventKind.NoteOff, frame, key, 0, 0f, 0, 0);
 
     private static double Sine(int sample, int key)
         => Math.Sin(2.0 * Math.PI * 440.0 * Math.Pow(2.0, (key - 69) / 12.0) * sample / SampleRate) * 0.25;

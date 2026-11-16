@@ -49,6 +49,15 @@ public sealed record PlanPluginParam(uint Id, double Value);
 public sealed record PlanPluginSlot(
     string PluginId, string FilePath, int ChannelId, IReadOnlyList<PlanPluginParam> Params);
 
+/// <summary>插件参数事件点（SPEC M3 竖切 4 D6）：lane 线性化产物，按 Sample 升序确定性派发。</summary>
+public struct RenderPluginParamEvent
+{
+    public int Slot;
+    public uint ParamId;
+    public long Sample;
+    public double Value;
+}
+
 /// <summary>采样资产数据：解码并重采样到工程采样率后的 f32 交错样本。</summary>
 public sealed class PlanAsset
 {
@@ -76,4 +85,6 @@ public sealed class RenderPlan
     public GainBreakpoint[]? MasterGainCurve { get; init; }
     /// <summary>插件槽表（SPEC M3）：voice.PluginSlot 的解析目标；空表 = 无插件声部。</summary>
     public PlanPluginSlot[] PluginSlots { get; init; } = [];
+    /// <summary>插件参数事件点（SPEC M3 竖切 4）：按 Sample 升序；空 = 无参数自动化。</summary>
+    public RenderPluginParamEvent[] PluginParamEvents { get; init; } = [];
 }

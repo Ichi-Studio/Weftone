@@ -80,6 +80,29 @@ public class PluginCompileTests
     }
 
     [Test]
+    public void Plugin_param_lanes_compile_to_sorted_step_events()
+    {
+        ProjectDocument document = NewPluginDocument();
+        Channel channel = document.Channels[0];
+        List<AutomationPoint> lane = channel.GetPluginParamPoints(1);
+        lane.Add(new AutomationPoint { Tick = 96, Value = 0.4 });
+        lane.Add(new AutomationPoint { Tick = 288, Value = 0.8 });
+        lane.Add(new AutomationPoint { Tick = 0, Value = 0.1 });
+        lane.Sort((a, b) => a.Tick.CompareTo(b.Tick));
+        RenderPlan plan = new DocumentCompiler().Compile(document);
+        Assert.Multiple(() =>
+        {
+            Assert.That(plan.PluginParamEvents.Length, Is.EqualTo(3), "sample0 首值 + 两个非零点");
+            Assert.That(plan.PluginParamEvents[0].Sample, Is.EqualTo(0));
+            Assert.That(plan.PluginParamEvents[0].Value, Is.EqualTo(0.1), "首点前 clamp");
+            Assert.That(plan.PluginParamEvents[1].Sample, Is.EqualTo(96 * 250));
+            Assert.That(plan.PluginParamEvents[1].Value, Is.EqualTo(0.4));
+            Assert.That(plan.PluginParamEvents[2].Sample, Is.EqualTo(288 * 250));
+            Assert.That(plan.PluginParamEvents[2].Slot, Is.EqualTo(0));
+        });
+    }
+
+    [Test]
     public void Two_plugin_channels_get_distinct_slots_in_document_order()
     {
         ProjectDocument document = NewPluginDocument();

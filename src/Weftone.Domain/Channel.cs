@@ -38,6 +38,21 @@ public sealed class Channel
     public string? PluginStateEntry { get; set; }
     /// <summary>state chunk SHA256（加载校验，同资产）。</summary>
     public string? PluginStateSha256 { get; set; }
+    private readonly Dictionary<uint, List<AutomationPoint>> _pluginParamPoints = [];
+
+    /// <summary>插件参数自动化 lane（SPEC M3 竖切 4）：paramId → 点列表（升序唯一不变量同 M2）。</summary>
+    public List<AutomationPoint> GetPluginParamPoints(uint paramId)
+    {
+        if (!_pluginParamPoints.TryGetValue(paramId, out List<AutomationPoint>? points))
+        {
+            points = [];
+            _pluginParamPoints[paramId] = points;
+        }
+        return points;
+    }
+
+    /// <summary>全部带自动化点的参数 id（序列化用）。</summary>
+    public IReadOnlyCollection<uint> AutomatedPluginParamIds => _pluginParamPoints.Keys;
     /// <summary>volume 自动化点（SPEC M2）：非空时时间轴上按曲线覆盖 Volume，Tick 升序唯一。</summary>
     public List<AutomationPoint> VolumePoints { get; } = [];
     /// <summary>pan 自动化点（SPEC M2）：非空时覆盖 Pan。</summary>

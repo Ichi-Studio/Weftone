@@ -15,7 +15,9 @@ public class PluginVoiceRenderTests
     /// 事件可关记录（零分配断言用）。</summary>
     private sealed class FakePlugin : IAudioPluginInstance
     {
-        public List<(int Frame, PluginNoteEventKind Kind, int Key, float Velocity)> Events { get; } = [];
+        public List<(int Frame, PluginEventKind Kind, int Key, float Velocity)> Events { get; } = [];
+        public List<(int Frame, uint ParamId, double Value)> ParamEvents { get; } = [];
+        public bool RecordValues;
         public bool Record = true;
         private bool _gate;
         public double SampleRate => 48_000;
@@ -25,21 +27,29 @@ public class PluginVoiceRenderTests
         public byte[]? SaveState() => null;
         public bool LoadState(byte[] data) => false;
 
-        public void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginNoteEvent> events)
+        public void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginEvent> events)
         {
             if (Record)
             {
-                foreach (PluginNoteEvent e in events)
+                foreach (PluginEvent e in events)
                 {
                     Events.Add((e.FrameOffset, e.Kind, e.Key, e.Velocity));
                 }
             }
             int cursor = 0;
-            foreach (PluginNoteEvent e in events)
+            foreach (PluginEvent e in events)
             {
+                if (e.Kind == PluginEventKind.ParamValue)
+                {
+                    if (RecordValues)
+                    {
+                        ParamEvents.Add((e.FrameOffset, e.ParamId, e.ParamValue));
+                    }
+                    continue;
+                }
                 FillGate(left, right, cursor, e.FrameOffset);
                 cursor = e.FrameOffset;
-                _gate = e.Kind == PluginNoteEventKind.On;
+                _gate = e.Kind == PluginEventKind.NoteOn;
             }
             FillGate(left, right, cursor, left.Length);
         }
@@ -89,8 +99,8 @@ public class PluginVoiceRenderTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(plugin.Events[0], Is.EqualTo((100, PluginNoteEventKind.On, 69, 0.8f)), "on 帧相对块起点");
-            Assert.That(plugin.Events[1], Is.EqualTo((244, PluginNoteEventKind.Off, 69, 0f)), "off@500 = chunk1(256)+244");
+            Assert.That(plugin.Events[0], Is.EqualTo((100, PluginEventKind.NoteOn, 69, 0.8f)), "on 帧相对块起点");
+            Assert.That(plugin.Events[1], Is.EqualTo((244, PluginEventKind.NoteOff, 69, 0f)), "off@500 = chunk1(256)+244");
             Assert.That(buffer[2 * 100], Is.EqualTo(0.5f).Within(1e-6f), "通道增益左");
             Assert.That(buffer[2 * 100 + 1], Is.EqualTo(0.25f).Within(1e-6f), "通道增益右");
             Assert.That(buffer[2 * 99], Is.EqualTo(0f), "on 前静音");
@@ -153,10 +163,10 @@ public class PluginVoiceRenderTests
         {
             Assert.That(plugin.Events.Select(e => (e.Frame, e.Kind, e.Key)), Is.EqualTo(new[]
             {
-                (0, PluginNoteEventKind.On, 60),
-                (50, PluginNoteEventKind.On, 64),
-                (100, PluginNoteEventKind.Off, 60),
-                (150, PluginNoteEventKind.Off, 64),
+                (0, PluginEventKind.NoteOn, 60),
+                (50, PluginEventKind.NoteOn, 64),
+                (100, PluginEventKind.NoteOff, 60),
+                (150, PluginEventKind.NoteOff, 64),
             }), "帧升序到达");
             Assert.That(buffer[2 * 60], Is.EqualTo(1f).Within(1e-6f), "门控常数：第二音维持开");
             Assert.That(buffer[2 * 150], Is.EqualTo(0f), "双关后静音");
@@ -181,10 +191,41 @@ public class PluginVoiceRenderTests
         {
             Assert.That(renderer.Position, Is.EqualTo(1_000));
             Assert.That(second.Events.Select(e => (e.Frame, e.Kind)),
-                Is.EqualTo(new (int, PluginNoteEventKind)[] { (0, PluginNoteEventKind.On) }),
+                Is.EqualTo(new (int, PluginEventKind)[] { (0, PluginEventKind.NoteOn) }),
                 "swap 后 playhead 前的 note 不补发，新声部正常触发");
             Assert.That(buffer[2 * 600], Is.EqualTo(1f).Within(1e-6f), "换表后出声");
             Assert.That(buffer[2 * 499], Is.EqualTo(1f).Within(1e-6f), "swap 前连续");
+        });
+    }
+
+    /// <summary>参数事件点（竖切 4）：编译事件按帧序派发到实例，sample0 首值生效。</summary>
+    [Test]
+    public void Param_events_dispatch_with_chunk_relative_frames()
+    {
+        var plugin = new FakePlugin { RecordValues = true };
+        var renderer = new PlanRenderer();
+        var plan = new RenderPlan
+        {
+            SampleRate = SampleRate,
+            Channels = 2,
+            TotalSamples = 600,
+            Voices = [PluginVoice(0, 100)],
+            PluginSlots = [new PlanPluginSlot("fake", "f.clap", 1, [])],
+            PluginParamEvents =
+            [
+                new RenderPluginParamEvent { Slot = 0, ParamId = 1, Sample = 0, Value = 0.1 },
+                new RenderPluginParamEvent { Slot = 0, ParamId = 1, Sample = 300, Value = 0.9 },
+                new RenderPluginParamEvent { Slot = 0, ParamId = 2, Sample = 300, Value = -5 },
+            ],
+        };
+        var buffer = new float[2 * 600];
+        renderer.Load(plan, [plugin]);
+        renderer.Render(buffer);
+        Assert.Multiple(() =>
+        {
+            Assert.That(plugin.ParamEvents[0], Is.EqualTo((0, 1u, 0.1)), "sample0 首值");
+            Assert.That(plugin.ParamEvents[1], Is.EqualTo((44, 1u, 0.9)), "300 = chunk1+44（帧序）");
+            Assert.That(plugin.ParamEvents[2], Is.EqualTo((44, 2u, -5.0)), "同帧参数按 id 稳定排序");
         });
     }
 
