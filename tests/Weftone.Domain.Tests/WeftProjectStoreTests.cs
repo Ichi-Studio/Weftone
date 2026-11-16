@@ -227,6 +227,48 @@ public class WeftProjectStoreTests
             Throws.TypeOf<InvalidProjectException>().With.Message.Contains(expectedError));
     }
 
+    [Test]
+    public void Plugin_refs_roundtrip_and_channel_binds_by_id()
+    {
+        var store = new WeftProjectStore();
+        var document = NewDocument();
+        document.Plugins.Add(new PluginRef { Id = "test.sine", Path = @"C:\plug\test.clap" });
+        document.Channels.Add(new Channel
+        {
+            Id = 3, Name = "Syn", Kind = ChannelKind.Plugin, PluginId = "test.sine",
+        });
+        string package = Path.Combine(_workDir, "plugin.weft");
+        store.Save(package, document, new Dictionary<string, string> { ["assets/kick.wav"] = WriteAsset() });
+
+        ProjectDocument loaded = store.Load(package).Document;
+        PluginRef plugin = loaded.Plugins.Single();
+        Channel bound = loaded.Channels.Single(c => c.Kind == ChannelKind.Plugin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(plugin.Id, Is.EqualTo("test.sine"));
+            Assert.That(plugin.Path, Is.EqualTo(@"C:\plug\test.clap"));
+            Assert.That(bound.PluginId, Is.EqualTo("test.sine"));
+            Assert.That(loaded.Channels[0].PluginId, Is.Null, "非 plugin 通道不写字段");
+        });
+    }
+
+    [Test]
+    public void Load_rejects_unknown_plugin_reference()
+    {
+        string package = Path.Combine(_workDir, "badplugin.weft");
+        using (var zip = ZipFile.Open(package, ZipArchiveMode.Create))
+        {
+            Write(zip, "metadata.json", """{"schemaVersion":1,"generator":"x"}""");
+            Write(zip, "project.json", """
+                {"schemaVersion":1,"tempo":140,"sampleRate":48000,
+                 "channels":[{"id":1,"name":"S","kind":"plugin","volume":1.0,"pan":0.0,"pluginId":"missing"}],
+                 "patterns":[],"playlist":[],"assets":[]}
+                """);
+        }
+        Assert.That(() => new WeftProjectStore().Load(package),
+            Throws.TypeOf<InvalidProjectException>().With.Message.Contains("未知 plugin"));
+    }
+
     private static void Write(ZipArchive zip, string name, string content)
     {
         ZipArchiveEntry entry = zip.CreateEntry(name);

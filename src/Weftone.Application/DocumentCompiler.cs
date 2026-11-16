@@ -43,6 +43,7 @@ public sealed class DocumentCompiler
         }
         var curveIndexByChannel = new Dictionary<int, int>();
         GainBreakpoint[][] curves = BuildChannelCurves(document, totalTicks, num, den, curveIndexByChannel);
+        Dictionary<int, int> pluginSlotByChannel = BuildPluginSlots(document, out PlanPluginSlot[] pluginSlots);
         var voices = new List<RenderVoice>();
         foreach (Clip clip in document.Playlist.OrderBy(c => c.StartTick))
         {
@@ -51,10 +52,11 @@ public sealed class DocumentCompiler
                 continue;
             }
             Pattern pattern = document.Patterns.First(p => p.Id == clip.PatternId);
-            AddPatternVoices(pattern, clip.StartTick, channelById, assetIndexById, curveIndexByChannel, num, den, voices);
+            AddPatternVoices(pattern, clip.StartTick, channelById, assetIndexById,
+                curveIndexByChannel, pluginSlotByChannel, num, den, voices);
         }
         return BuildPlan(document, assets, voices, totalTicks, loop: false, num, den, curves,
-            BuildMasterCurve(document, totalTicks, num, den));
+            BuildMasterCurve(document, totalTicks, num, den), pluginSlots);
     }
 
     /// <summary>Pattern 模式：单个 Pattern 从 0 展开为声部，循环区间 = [0, 长度)，长度按小节向上取整（至少 1 小节）。</summary>
@@ -70,10 +72,11 @@ public sealed class DocumentCompiler
         long lengthTicks = PatternLengthTicks(pattern);
         var curveIndexByChannel = new Dictionary<int, int>();
         GainBreakpoint[][] curves = BuildChannelCurves(document, lengthTicks, num, den, curveIndexByChannel);
+        Dictionary<int, int> pluginSlotByChannel = BuildPluginSlots(document, out PlanPluginSlot[] pluginSlots);
         var voices = new List<RenderVoice>();
-        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, num, den, voices);
+        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, num, den, voices);
         return BuildPlan(document, assets, voices, lengthTicks, loop: true, num, den, curves,
-            BuildMasterCurve(document, lengthTicks, num, den));
+            BuildMasterCurve(document, lengthTicks, num, den), pluginSlots);
     }
 
     /// <summary>Pattern 循环长度：最大音符结束 tick 向上取整到小节，至少 1 小节（4 拍）。</summary>
@@ -107,9 +110,35 @@ public sealed class DocumentCompiler
         return assetIndexById;
     }
 
+    /// <summary>Plugin 通道 → 每通道一槽（各自独立实例）；引用缺失抛错（工程不完整）。</summary>
+    private static Dictionary<int, int> BuildPluginSlots(ProjectDocument document, out PlanPluginSlot[] slots)
+    {
+        var slotByChannel = new Dictionary<int, int>();
+        var list = new List<PlanPluginSlot>();
+        foreach (Channel channel in document.Channels)
+        {
+            if (channel.Kind != ChannelKind.Plugin)
+            {
+                continue;
+            }
+            PluginRef reference = document.Plugins.FirstOrDefault(p => p.Id == channel.PluginId)
+                ?? throw new InvalidOperationException(
+                    $"plugin channel {channel.Id} 引用未知插件 {channel.PluginId}");
+            if (string.IsNullOrWhiteSpace(reference.Path))
+            {
+                throw new InvalidOperationException($"插件 {reference.Id} 缺少 .clap 路径");
+            }
+            slotByChannel[channel.Id] = list.Count;
+            list.Add(new PlanPluginSlot(reference.Id, reference.Path));
+        }
+        slots = [.. list];
+        return slotByChannel;
+    }
+
     private static void AddPatternVoices(Pattern pattern, long startTickOffset,
         Dictionary<int, Channel> channelById, Dictionary<string, int> assetIndexById,
-        Dictionary<int, int> curveIndexByChannel, long num, long den, List<RenderVoice> voices)
+        Dictionary<int, int> curveIndexByChannel, Dictionary<int, int> pluginSlotByChannel,
+        long num, long den, List<RenderVoice> voices)
     {
         foreach (Note note in pattern.Notes)
         {
@@ -126,6 +155,23 @@ public sealed class DocumentCompiler
                 }
                 // MIDI 60 = 原速；key 偏移即播放速率
                 frequency = Math.Pow(2.0, (note.Key - 60) / 12.0);
+            }
+            if (channel.Kind == ChannelKind.Plugin)
+            {
+                // 插件声部：note on/off 区间事件；增益=通道 vol/pan（velocity 由插件自理），
+                // 自动化曲线本竖切不作用于插件输出（静态值，精度提升留竖切 4）
+                voices.Add(new RenderVoice
+                {
+                    StartSample = TickMath.TicksToSamples(startTickOffset + note.Tick, num, den),
+                    LengthSamples = Math.Max(1, TickMath.TicksToSamples(note.LengthTicks, num, den)),
+                    Kind = RenderVoiceKind.Plugin,
+                    GainLeft = (float)(channel.Volume * panLeft),
+                    GainRight = (float)(channel.Volume * panRight),
+                    PluginSlot = pluginSlotByChannel[channel.Id],
+                    NoteKey = note.Key,
+                    Velocity = (float)note.Velocity,
+                });
+                continue;
             }
             int curveIndex = curveIndexByChannel.TryGetValue(channel.Id, out int mapped) ? mapped : -1;
             voices.Add(new RenderVoice
@@ -240,7 +286,8 @@ public sealed class DocumentCompiler
 
     private static RenderPlan BuildPlan(ProjectDocument document, IReadOnlyList<PreparedAsset> assets,
         List<RenderVoice> voices, long totalTicks, bool loop, long num, long den,
-        GainBreakpoint[][] channelGainCurves, GainBreakpoint[]? masterGainCurve)
+        GainBreakpoint[][] channelGainCurves, GainBreakpoint[]? masterGainCurve,
+        PlanPluginSlot[] pluginSlots)
     {
         RenderVoice[] sorted = voices.OrderBy(v => v.StartSample).ToArray();
         var planAssets = new PlanAsset[assets.Count];
@@ -266,6 +313,7 @@ public sealed class DocumentCompiler
             Assets = planAssets,
             ChannelGainCurves = channelGainCurves,
             MasterGainCurve = masterGainCurve,
+            PluginSlots = pluginSlots,
         };
     }
 }

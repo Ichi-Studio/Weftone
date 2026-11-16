@@ -1,4 +1,5 @@
 using Weftone.Abstractions;
+using Weftone.Abstractions.Plugins;
 using Weftone.Abstractions.Rendering;
 using Weftone.Domain;
 
@@ -7,12 +8,14 @@ namespace Weftone.Application;
 public sealed record RenderedProject(
     float[] Interleaved, int SampleRate, int Channels, long Frames, double Peak, TimeSpan Duration);
 
-/// <summary>导出用例：.weft → 资产准备 → 编译 → 离线渲染（ADR-0003 全离线）。</summary>
+/// <summary>导出用例：.weft → 资产准备 → 编译 → 离线渲染（ADR-0003 全离线）。
+/// 插件工程经临时实例表渲染（单线程，用后即毁）。</summary>
 public sealed class ProjectRenderService(
     IProjectStore store,
     ISampleDecoder decoder,
     IResampler resampler,
-    IPlanRenderer renderer)
+    IPlanRenderer renderer,
+    IPluginInstanceFactory? pluginFactory = null)
 {
     private const int BlockFrames = 512;
 
@@ -24,27 +27,46 @@ public sealed class ProjectRenderService(
             .Prepare(loaded.Document, loaded.OpenAsset, decoder, resampler);
         RenderPlan plan = new DocumentCompiler().Compile(loaded.Document, assets);
 
-        renderer.Load(plan);
-        long frames = plan.TotalSamples;
-        var interleaved = new float[frames * plan.Channels];
-        var block = new float[BlockFrames * plan.Channels];
-        double peak = 0;
-        for (long done = 0; done < frames; done += BlockFrames)
+        IReadOnlyList<IAudioPluginInstance>? table = null;
+        PluginInstanceHost? host = null;
+        if (plan.PluginSlots.Length > 0 && pluginFactory is not null)
         {
-            int count = (int)Math.Min(BlockFrames, frames - done);
-            Span<float> span = block.AsSpan(0, count * plan.Channels);
-            renderer.Render(span);
-            span.CopyTo(interleaved.AsSpan((int)(done * plan.Channels), span.Length));
-            for (int i = 0; i < span.Length; i++)
+            host = new PluginInstanceHost(pluginFactory);
+            table = host.Sync(plan);
+        }
+        try
+        {
+            return RenderPlan(plan);
+        }
+        finally
+        {
+            host?.Dispose();
+        }
+
+        RenderedProject RenderPlan(RenderPlan captured)
+        {
+            renderer.Load(captured, table);
+            long frames = captured.TotalSamples;
+            var interleaved = new float[frames * captured.Channels];
+            var block = new float[BlockFrames * captured.Channels];
+            double peak = 0;
+            for (long done = 0; done < frames; done += BlockFrames)
             {
-                double magnitude = Math.Abs(span[i]);
-                if (magnitude > peak)
+                int count = (int)Math.Min(BlockFrames, frames - done);
+                Span<float> span = block.AsSpan(0, count * captured.Channels);
+                renderer.Render(span);
+                span.CopyTo(interleaved.AsSpan((int)(done * captured.Channels), span.Length));
+                for (int i = 0; i < span.Length; i++)
                 {
-                    peak = magnitude;
+                    double magnitude = Math.Abs(span[i]);
+                    if (magnitude > peak)
+                    {
+                        peak = magnitude;
+                    }
                 }
             }
+            return new RenderedProject(interleaved, captured.SampleRate, captured.Channels, frames, peak,
+                TimeSpan.FromSeconds((double)frames / captured.SampleRate));
         }
-        return new RenderedProject(interleaved, plan.SampleRate, plan.Channels, frames, peak,
-            TimeSpan.FromSeconds((double)frames / plan.SampleRate));
     }
 }

@@ -23,6 +23,7 @@ internal sealed class ProjectJson
     [JsonPropertyName("patterns")] public List<PatternJson> Patterns { get; set; } = [];
     [JsonPropertyName("playlist")] public List<ClipJson> Playlist { get; set; } = [];
     [JsonPropertyName("assets")] public List<AssetJson> Assets { get; set; } = [];
+    [JsonPropertyName("plugins")] public List<PluginRefJson>? Plugins { get; set; }
 }
 
 internal sealed class ChannelJson
@@ -33,10 +34,18 @@ internal sealed class ChannelJson
     [JsonPropertyName("volume")] public double Volume { get; set; }
     [JsonPropertyName("pan")] public double Pan { get; set; }
     [JsonPropertyName("assetId")] public string? AssetId { get; set; }
+    [JsonPropertyName("pluginId")] public string? PluginId { get; set; }
     [JsonPropertyName("volumePoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<AutomationPointJson>? VolumePoints { get; set; }
     [JsonPropertyName("panPoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<AutomationPointJson>? PanPoints { get; set; }
+}
+
+/// <summary>插件引用（SPEC M3）：id ↔ channel.pluginId；path 为本地 .clap 路径（插件不入包）。</summary>
+internal sealed class PluginRefJson
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("path")] public string Path { get; set; } = "";
 }
 
 /// <summary>自动化点（SPEC M2，schema v1 可选字段）：lane 内 tick 严格升序、值域随参数。</summary>
@@ -91,7 +100,7 @@ internal static class SchemaMapper
             Channels = document.Channels.Select(c => new ChannelJson
             {
                 Id = c.Id, Name = c.Name, Kind = KindToString(c.Kind),
-                Volume = c.Volume, Pan = c.Pan, AssetId = c.AssetId,
+                Volume = c.Volume, Pan = c.Pan, AssetId = c.AssetId, PluginId = c.PluginId,
                 VolumePoints = MapLane(c.VolumePoints),
                 PanPoints = MapLane(c.PanPoints),
             }).ToList(),
@@ -108,6 +117,9 @@ internal static class SchemaMapper
             {
                 PatternId = c.PatternId, StartTick = c.StartTick,
             }).ToList(),
+            Plugins = document.Plugins.Count == 0
+                ? null
+                : document.Plugins.Select(p => new PluginRefJson { Id = p.Id, Path = p.Path }).ToList(),
             Assets = document.Assets.Select(a => new AssetJson
             {
                 Id = a.Id, Path = a.Path, Sha256 = a.Sha256,
@@ -135,11 +147,23 @@ internal static class SchemaMapper
                 Volume = c.Volume,
                 Pan = c.Pan,
                 AssetId = c.AssetId,
+                PluginId = c.PluginId,
             });
             document.Channels[^1].VolumePoints.AddRange(ParseLane(c.VolumePoints,
                 $"channel {c.Id} volumePoints", 0, 2));
             document.Channels[^1].PanPoints.AddRange(ParseLane(c.PanPoints,
                 $"channel {c.Id} panPoints", -1, 1));
+        }
+
+        if (json.Plugins is not null)
+        {
+            var pluginIds = new HashSet<string>();
+            foreach (PluginRefJson p in json.Plugins)
+            {
+                Require(pluginIds.Add(p.Id), $"plugin id 重复: {p.Id}");
+                Require(!string.IsNullOrWhiteSpace(p.Path), $"插件 {p.Id} 缺少 .clap 路径");
+                document.Plugins.Add(new PluginRef { Id = p.Id, Path = p.Path });
+            }
         }
 
         document.MasterVolumePoints.AddRange(ParseLane(json.MasterVolumePoints, "masterVolumePoints", 0, 2));
@@ -159,6 +183,12 @@ internal static class SchemaMapper
                 Require(!string.IsNullOrEmpty(c.AssetId), $"sampler channel {c.Id} 缺少 assetId");
                 Require(document.Assets.Any(a => a.Id == c.AssetId),
                     $"channel {c.Id} 引用未知 asset {c.AssetId}");
+            }
+            if (ParseKind(c.Kind) == ChannelKind.Plugin)
+            {
+                Require(!string.IsNullOrEmpty(c.PluginId), $"plugin channel {c.Id} 缺少 pluginId");
+                Require(document.Plugins.Any(p => p.Id == c.PluginId),
+                    $"channel {c.Id} 引用未知 plugin {c.PluginId}");
             }
             Require(c.Volume is >= 0 and <= 2, $"channel {c.Id} 音量越界: {c.Volume}");
             Require(c.Pan is >= -1 and <= 1, $"channel {c.Id} 声像越界: {c.Pan}");
@@ -205,6 +235,7 @@ internal static class SchemaMapper
     {
         ChannelKind.Sine => "sine",
         ChannelKind.Sampler => "sampler",
+        ChannelKind.Plugin => "plugin",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -235,6 +266,7 @@ internal static class SchemaMapper
     {
         "sine" => ChannelKind.Sine,
         "sampler" => ChannelKind.Sampler,
+        "plugin" => ChannelKind.Plugin,
         _ => throw new InvalidProjectException($"未知声部类型: {kind}"),
     };
 

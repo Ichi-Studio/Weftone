@@ -58,6 +58,46 @@ public static class ClapBridgeNative
     [DllImport(LibName)]
     private static extern int weft_clap_scan(string path, [Out] PluginInfo[] infos, int max);
 
+    [DllImport(LibName)]
+    private static extern nint weft_clap_plugin_create(string path, string pluginId, double sampleRate);
+
+    [DllImport(LibName)]
+    private static extern void weft_clap_plugin_destroy(nint instance);
+
+    [DllImport(LibName)]
+    private static unsafe extern void weft_clap_plugin_process(
+        nint instance, float* left, float* right, int frames, NoteEventNative* events, int count);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NoteEventNative
+    {
+        public int Frame;
+        public int IsOn;
+        public int Key;
+        public int Channel;
+        public float Velocity;
+    }
+
+    /// <summary>创建已激活并进入处理态的 CLAP 实例；失败返回 0（加载/id 不符/端口契约不符）。</summary>
+    public static nint CreateInstance(string clapPath, string pluginId, double sampleRate)
+    {
+        EnsureInstalled();
+        return weft_clap_plugin_create(clapPath, pluginId, sampleRate);
+    }
+
+    internal static unsafe void ProcessInstance(nint instance, Span<float> left, Span<float> right,
+        ReadOnlySpan<NoteEventNative> events)
+    {
+        fixed (float* l = left)
+        fixed (float* r = right)
+        fixed (NoteEventNative* e = events)
+        {
+            weft_clap_plugin_process(instance, l, r, left.Length, e, events.Length);
+        }
+    }
+
+    public static void DestroyInstance(nint instance) => weft_clap_plugin_destroy(instance);
+
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (libraryName != LibName)

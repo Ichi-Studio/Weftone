@@ -4,6 +4,8 @@ public enum RenderVoiceKind : byte
 {
     Sine = 0,
     Sampler = 1,
+    /// <summary>CLAP 插件乐器（SPEC M3）：note on/off 区间事件驱动插件实例，PluginSlot 指向槽表。</summary>
+    Plugin = 2,
 }
 
 /// <summary>单次触发事件：全部参数离线预乘，渲染期只读、零计算负担外置。</summary>
@@ -19,6 +21,12 @@ public struct RenderVoice
     /// <summary>通道增益曲线索引（SPEC M2）：-1=静态 GainLeft/GainRight（无自动化通道，行为不变）；
     /// ≥0 时 GainLeft 持 velocity，通道 vol/pan 增益改由曲线逐样本插值。</summary>
     public int GainCurveIndex = -1;
+    /// <summary>插件槽索引（SPEC M3）：Kind==Plugin 时有效，指向 RenderPlan.PluginSlots。</summary>
+    public int PluginSlot = -1;
+    /// <summary>MIDI key（0..127，60=中央 C），Kind==Plugin 时传给插件 note 事件。</summary>
+    public int NoteKey;
+    /// <summary>音符力度（0..1），Kind==Plugin 时传给插件 note 事件。</summary>
+    public float Velocity;
 
     public RenderVoice()
     {
@@ -32,6 +40,10 @@ public struct GainBreakpoint
     public float GainLeft;
     public float GainRight;
 }
+
+/// <summary>插件槽（SPEC M3 D5）：plan 声部的 PluginSlot 索引此处；
+/// 实例由引擎侧实例表按 (PluginId, Path) 复用/创建（RCU 换表），plan 保持纯数据。</summary>
+public sealed record PlanPluginSlot(string PluginId, string FilePath);
 
 /// <summary>采样资产数据：解码并重采样到工程采样率后的 f32 交错样本。</summary>
 public sealed class PlanAsset
@@ -58,4 +70,6 @@ public sealed class RenderPlan
     public GainBreakpoint[][] ChannelGainCurves { get; init; } = [];
     /// <summary>master volume 曲线（SPEC M2）：null = 静态 MasterGain（现状行为）；非 null 时 GainLeft==GainRight。</summary>
     public GainBreakpoint[]? MasterGainCurve { get; init; }
+    /// <summary>插件槽表（SPEC M3）：voice.PluginSlot 的解析目标；空表 = 无插件声部。</summary>
+    public PlanPluginSlot[] PluginSlots { get; init; } = [];
 }

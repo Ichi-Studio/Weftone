@@ -4,7 +4,7 @@ project(weftone_clap_bridge LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_library(weftone_clap_bridge SHARED weft_clap.c)
+add_library(weftone_clap_bridge SHARED weft_clap.c weft_clap_plugin.c)
 
 target_include_directories(weftone_clap_bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/clap/include)

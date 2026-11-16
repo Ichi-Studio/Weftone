@@ -19,4 +19,6 @@ public sealed class ProjectDocument
     public List<Pattern> Patterns { get; } = [];
     public List<Clip> Playlist { get; } = [];
     public List<AssetRef> Assets { get; } = [];
+    /// <summary>工程引用的 CLAP 插件（SPEC M3）：Id ↔ Channel.PluginId；Path 为本地 .clap 路径。</summary>
+    public List<PluginRef> Plugins { get; } = [];
 }

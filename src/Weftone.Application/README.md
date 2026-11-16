@@ -19,7 +19,12 @@
   资产临时工作区；命令事务（Begin/EndTransaction）把拖拽手势合并为单条撤销；
   `ImportSample`（解码校验 → 工作区 → ImportSampleCommand 一步注册资产+通道）；
   `ExportWav`（Song 全时间轴离线渲染，float32 WAV，独立离线渲染器实例）。
-- `ProjectRenderService` / `WavWriter`：离线导出（M1a 竖切 4，CLI 接入）。
+- `PluginInstanceHost`（M3 D5）：按 plan 槽表同步实例——(path,id,采样率) 相同
+  即复用（保插件内部状态），否则新建；多余实例隔代退役（in-process 近似，
+  M6 out-of-process 收紧）。PlaybackService/ExportWav/ProjectRenderService 经
+  `IPluginInstanceFactory` 端口注入。
+- `ProjectRenderService` / `WavWriter`：离线导出（M1a 竖切 4，CLI 接入；
+  M3 插件工程经临时实例表渲染）。
 - `RecoveryStore` / `AutosavePolicy`（M2 D4=a）：恢复区（%LocalAppData%\Weftone\recovery）
   每工程一槽（key=路径 SHA256，未保存=untitled）；原子写 *.tmp → File.Replace，
   中断的临时写不破坏旧快照；策略=编辑后空闲 ≥5s 或距上次快照 ≥50 次命令

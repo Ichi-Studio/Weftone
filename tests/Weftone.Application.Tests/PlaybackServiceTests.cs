@@ -31,12 +31,13 @@ public class PlaybackServiceTests
         public int LoadCount;
         public int SwapCount;
         public long Position { get; set; }
-        public void Load(RenderPlan plan)
+        public void Load(RenderPlan plan, IReadOnlyList<Weftone.Abstractions.Plugins.IAudioPluginInstance>? plugins = null)
         {
             LoadCount++;
             Position = 0;
         }
-        public void SwapPlan(RenderPlan plan) => SwapCount++;
+        public void SwapPlan(RenderPlan plan, IReadOnlyList<Weftone.Abstractions.Plugins.IAudioPluginInstance>? plugins = null)
+            => SwapCount++;
         public void Render(Span<float> interleaved) { }
     }
 

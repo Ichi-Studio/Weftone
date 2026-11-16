@@ -1,3 +1,4 @@
+using Weftone.Abstractions.Plugins;
 using Weftone.Abstractions.Rendering;
 
 namespace Weftone.Engine;
@@ -11,6 +12,9 @@ namespace Weftone.Engine;
 /// RCU 交换（SPEC M2 竖切 4）：池声部直接持有资产/曲线引用（plan 不可变 ⇒ 换 plan
 /// 不影响在飞声部）；SwapPlan 只做 volatile 引用写入，游标在音频线程内按当前绝对
 /// 位置惰性二分重定位，transport 不重置——播放中编辑无静音缺口；全程零分配。
+/// 插件声部（SPEC M3 D5）：plan+实例表打包为 State 原子换入（配对防 slot 错位）；
+/// note on/off 区间事件按 256 帧 chunk 派发插件 process，输出乘通道静态增益入总线
+/// （插件通道的 vol/pan 曲线走静态值，自动化精度留竖切 4）；全程零分配。
 /// </summary>
 public sealed class PlanRenderer : IPlanRenderer
 {
@@ -18,6 +22,32 @@ public sealed class PlanRenderer : IPlanRenderer
     private const int FadeTail = 128;
     private const int PendingCapacity = 32;
     private const double TwoPi = 6.283185307179586476925286766559;
+    private const int PluginChunkFrames = 256;
+    private const int MaxActivePluginNotes = 256;
+
+    /// <summary>plan 与插件实例表原子束：一次 volatile 引用换入，避免新 plan 配旧表的 slot 错位。</summary>
+    private sealed class State
+    {
+        public RenderPlan? Plan;
+        public IAudioPluginInstance[] Plugins = [];
+        /// <summary>每槽事件 scratch（表构造线程预分配，音频线程只写不扩）。</summary>
+        public PluginNoteEvent[][] Scratch = [];
+        /// <summary>每槽最近通道增益（note off 后的 release 尾巴沿用；同通道同值）。</summary>
+        public float[] SlotGainLeft = [];
+        public float[] SlotGainRight = [];
+    }
+
+    private struct PluginVoice
+    {
+        public long Start;
+        public long End;
+        public int Slot;
+        public int Key;
+        public int Channel;
+        public float Velocity;
+        public float GainLeft;
+        public float GainRight;
+    }
 
     private struct Voice
     {
@@ -39,10 +69,14 @@ public sealed class PlanRenderer : IPlanRenderer
 
     private readonly Voice[] _pool = new Voice[MaxVoices];
     private readonly RenderVoice[] _pending = new RenderVoice[PendingCapacity];
+    private readonly PluginVoice[] _pluginNotes = new PluginVoice[MaxActivePluginNotes];
+    private readonly float[] _pluginLeft = new float[PluginChunkFrames];
+    private readonly float[] _pluginRight = new float[PluginChunkFrames];
     private int _pendingHead;
     private int _pendingCount;
-    private volatile RenderPlan? _plan;
-    /// <summary>游标/循环状态所属 plan（音频线程内与 _plan 快照比对，检测交换后重定位）。</summary>
+    private int _pluginNoteCount;
+    private volatile State _state = new();
+    /// <summary>游标/循环状态所属 plan（音频线程内与当前 plan 快照比对，检测交换后重定位）。</summary>
     private RenderPlan? _cursorPlan;
     private int _nextEvent;
     private long _position;
@@ -54,27 +88,51 @@ public sealed class PlanRenderer : IPlanRenderer
 
     public long DroppedEvents { get; private set; }
 
-    public void Load(RenderPlan plan)
+    public void Load(RenderPlan plan, IReadOnlyList<IAudioPluginInstance>? plugins = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        _plan = plan;
+        _state = BuildState(plan, plugins ?? []);
         _position = 0;
+        _pluginNoteCount = 0;
         DroppedEvents = 0;
         Array.Clear(_pool);
         ResyncCursor(plan);
     }
 
-    /// <summary>RCU 交换：仅 volatile 写入；重定位在音频线程 Render 内惰性完成（SPEC M2 竖切 4）。</summary>
-    public void SwapPlan(RenderPlan plan)
+    /// <summary>RCU 交换：State 原子换入（plan+实例表配对）；重定位在音频线程 Render 内惰性完成。</summary>
+    public void SwapPlan(RenderPlan plan, IReadOnlyList<IAudioPluginInstance>? plugins = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        _plan = plan;
+        State previous = _state;
+        _state = plugins is null
+            ? BuildState(plan, previous.Plugins)
+            : BuildState(plan, plugins);
+    }
+
+    private static State BuildState(RenderPlan plan, IReadOnlyList<IAudioPluginInstance> plugins)
+    {
+        var state = new State
+        {
+            Plan = plan,
+            Plugins = [.. plugins],
+            Scratch = new PluginNoteEvent[plugins.Count][],
+            SlotGainLeft = new float[plugins.Count],
+            SlotGainRight = new float[plugins.Count],
+        };
+        for (int i = 0; i < plugins.Count; i++)
+        {
+            state.Scratch[i] = new PluginNoteEvent[PluginChunkFrames];
+            state.SlotGainLeft[i] = 1f;
+            state.SlotGainRight[i] = 1f;
+        }
+        return state;
     }
 
     public void Render(Span<float> interleaved)
     {
         interleaved.Clear();
-        RenderPlan? plan = _plan;
+        State state = _state;
+        RenderPlan? plan = state.Plan;
         if (plan is null)
         {
             return;
@@ -97,9 +155,11 @@ public sealed class PlanRenderer : IPlanRenderer
                 long tillEnd = _loopEnd - _position;
                 if (tillEnd <= 0)
                 {
-                    // 回绕：位置回 loopStart，事件游标归零重触发；活跃声部自然延续尾音
+                    // 回绕：位置回 loopStart，事件游标归零重触发；池声部延续尾音，
+                    // 插件 note 窗口重置（事件从头重放，插件内部声部自行延续）
                     _position = _loopStart;
                     _nextEvent = 0;
+                    _pluginNoteCount = 0;
                     tillEnd = _loopEnd - _position;
                 }
                 if (tillEnd > 0 && tillEnd < segment)
@@ -107,7 +167,7 @@ public sealed class PlanRenderer : IPlanRenderer
                     segment = tillEnd;
                 }
             }
-            RenderSegment(plan, interleaved, rendered, (int)segment);
+            RenderSegment(state, plan, interleaved, rendered, (int)segment);
             rendered += (int)segment;
         }
 
@@ -122,13 +182,15 @@ public sealed class PlanRenderer : IPlanRenderer
     }
 
     /// <summary>换 plan 后重定位：事件游标二分到当前绝对位置（playhead 前的事件不补触发）、
-    /// 放弃旧 plan 的 pending 溢出事件、更新循环区间；仅音频线程调用。</summary>
+    /// 放弃旧 plan 的 pending 溢出事件与在飞插件 note 窗口（slot 映射已变，旧 off 不再可靠——
+    /// 已知限制见 SPEC M3 风险）、更新循环区间；仅音频线程调用。</summary>
     private void ResyncCursor(RenderPlan plan)
     {
         _cursorPlan = plan;
         DroppedEvents += _pendingCount;
         _pendingHead = 0;
         _pendingCount = 0;
+        _pluginNoteCount = 0;
         _loopStart = plan.LoopStartSample;
         _loopEnd = plan.LoopEndSample;
         if (_masterGainCursor >= plan.MasterGainCurve?.Length)
@@ -152,7 +214,7 @@ public sealed class PlanRenderer : IPlanRenderer
         _nextEvent = low;
     }
 
-    private void RenderSegment(RenderPlan plan, Span<float> interleaved, int offsetFrames, int frames)
+    private void RenderSegment(State state, RenderPlan plan, Span<float> interleaved, int offsetFrames, int frames)
     {
         Span<float> slice = interleaved.Slice(offsetFrames * 2, frames * 2);
         long segmentStart = _position;
@@ -160,7 +222,32 @@ public sealed class PlanRenderer : IPlanRenderer
 
         while (_nextEvent < plan.Voices.Length && plan.Voices[_nextEvent].StartSample < end)
         {
-            Activate(plan.Voices[_nextEvent], plan);
+            RenderVoice voice = plan.Voices[_nextEvent];
+            if (voice.Kind == RenderVoiceKind.Plugin)
+            {
+                if (_pluginNoteCount < _pluginNotes.Length)
+                {
+                    _pluginNotes[_pluginNoteCount++] = new PluginVoice
+                    {
+                        Start = voice.StartSample,
+                        End = voice.StartSample + voice.LengthSamples,
+                        Slot = voice.PluginSlot,
+                        Key = voice.NoteKey,
+                        Channel = 0,
+                        Velocity = voice.Velocity,
+                        GainLeft = voice.GainLeft,
+                        GainRight = voice.GainRight,
+                    };
+                }
+                else
+                {
+                    DroppedEvents++;
+                }
+            }
+            else
+            {
+                Activate(voice, plan);
+            }
             _nextEvent++;
         }
 
@@ -181,6 +268,8 @@ public sealed class PlanRenderer : IPlanRenderer
             }
         }
 
+        RenderPluginSegment(state, slice, frames, segmentStart);
+
         if (plan.MasterGainCurve is { } masterCurve)
         {
             for (int i = 0; i < frames; i++)
@@ -195,6 +284,110 @@ public sealed class PlanRenderer : IPlanRenderer
 
         FillSlotsFromPending(plan);
         _position = end;
+    }
+
+    /// <summary>插件声部段渲染：note on/off 窗口按 256 帧 chunk 派发给实例，
+    /// 事件按帧序（on 序 + off 序归并后插入排序），输出乘通道静态增益入总线；零分配。</summary>
+    private void RenderPluginSegment(State state, Span<float> slice, int frames, long segmentStart)
+    {
+        if (_pluginNoteCount == 0 || state.Plugins.Length == 0)
+        {
+            // 无窗口仍需清理：note 都在本段结束（理论上 _pluginNoteCount>0 才有），早退安全
+            if (_pluginNoteCount > 0)
+            {
+                RemoveFinishedPluginNotes(segmentStart + frames);
+            }
+            return;
+        }
+        int done = 0;
+        while (done < frames)
+        {
+            int chunk = Math.Min(PluginChunkFrames, frames - done);
+            long chunkStart = segmentStart + done;
+            long chunkEnd = chunkStart + chunk;
+
+            for (int slot = 0; slot < state.Plugins.Length; slot++)
+            {
+                PluginNoteEvent[] scratch = state.Scratch[slot];
+                int count = 0;
+                bool slotActive = false;
+                float gainLeft = state.SlotGainLeft[Math.Min(slot, state.SlotGainLeft.Length - 1)];
+                float gainRight = state.SlotGainRight[Math.Min(slot, state.SlotGainRight.Length - 1)];
+                for (int i = 0; i < _pluginNoteCount; i++)
+                {
+                    PluginVoice note = _pluginNotes[i];
+                    if (note.Slot != slot)
+                    {
+                        continue;
+                    }
+                    slotActive = true;
+                    gainLeft = note.GainLeft;
+                    gainRight = note.GainRight;
+                    if (count >= scratch.Length)
+                    {
+                        break;
+                    }
+                    if (note.Start >= chunkStart && note.Start < chunkEnd)
+                    {
+                        scratch[count++] = new PluginNoteEvent(
+                            PluginNoteEventKind.On, (int)(note.Start - chunkStart), note.Key, note.Channel, note.Velocity);
+                    }
+                    if (note.End > chunkStart && note.End < chunkEnd && count < scratch.Length)
+                    {
+                        scratch[count++] = new PluginNoteEvent(
+                            PluginNoteEventKind.Off, (int)(note.End - chunkStart), note.Key, note.Channel, 0f);
+                    }
+                }
+                if (!slotActive)
+                {
+                    continue;
+                }
+                state.SlotGainLeft[Math.Min(slot, state.SlotGainLeft.Length - 1)] = gainLeft;
+                state.SlotGainRight[Math.Min(slot, state.SlotGainRight.Length - 1)] = gainRight;
+                SortPluginEvents(scratch, count);
+
+                state.Plugins[slot].Process(
+                    _pluginLeft.AsSpan(0, chunk), _pluginRight.AsSpan(0, chunk), scratch.AsSpan(0, count));
+
+                int offset = done * 2;
+                for (int i = 0; i < chunk; i++)
+                {
+                    slice[offset + 2 * i] += _pluginLeft[i] * gainLeft;
+                    slice[offset + 2 * i + 1] += _pluginRight[i] * gainRight;
+                }
+            }
+            done += chunk;
+        }
+        RemoveFinishedPluginNotes(segmentStart + frames);
+    }
+
+    private void RemoveFinishedPluginNotes(long segmentEnd)
+    {
+        int write = 0;
+        for (int i = 0; i < _pluginNoteCount; i++)
+        {
+            if (_pluginNotes[i].End > segmentEnd)
+            {
+                _pluginNotes[write++] = _pluginNotes[i];
+            }
+        }
+        _pluginNoteCount = write;
+    }
+
+    /// <summary>CLAP 要求事件按帧升序：on 序与 off 序各自有序，插入排序归并（每块事件数小）。</summary>
+    private static void SortPluginEvents(PluginNoteEvent[] events, int count)
+    {
+        for (int i = 1; i < count; i++)
+        {
+            PluginNoteEvent key = events[i];
+            int j = i - 1;
+            while (j >= 0 && events[j].FrameOffset > key.FrameOffset)
+            {
+                events[j + 1] = events[j];
+                j--;
+            }
+            events[j + 1] = key;
+        }
     }
 
     private void Activate(in RenderVoice voice, RenderPlan plan)

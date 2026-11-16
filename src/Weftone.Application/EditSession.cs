@@ -1,4 +1,5 @@
 using Weftone.Abstractions;
+using Weftone.Abstractions.Plugins;
 using Weftone.Abstractions.Rendering;
 using Weftone.Domain;
 using Weftone.Domain.Commands;
@@ -19,13 +20,14 @@ public sealed class EditSession : IDisposable
     private readonly ISampleDecoder _decoder;
     private readonly IResampler _resampler;
     private readonly IPlanRenderer _offlineRenderer;
+    private readonly IPluginInstanceFactory? _pluginFactory;
     private readonly string _workspace;
     private readonly Dictionary<string, string> _assetSources = new();
     private List<PreparedAsset> _prepared = [];
     private bool _disposed;
 
     public EditSession(IProjectStore store, ISampleDecoder decoder, IResampler resampler,
-        IPlanRenderer offlineRenderer)
+        IPlanRenderer offlineRenderer, IPluginInstanceFactory? pluginFactory = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(decoder);
@@ -35,6 +37,7 @@ public sealed class EditSession : IDisposable
         _decoder = decoder;
         _resampler = resampler;
         _offlineRenderer = offlineRenderer;
+        _pluginFactory = pluginFactory;
         _workspace = Path.Combine(Path.GetTempPath(), "weftone-session-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_workspace);
         Document = new ProjectDocument();
@@ -191,25 +194,39 @@ public sealed class EditSession : IDisposable
 
     /// <summary>
     /// 导出 WAV（spec §导出 WAV）：Song 全时间轴离线渲染（与实时播放互不干扰），
-    /// IEEE float32 立体声。空时间轴写 0 帧 WAV。
+    /// IEEE float32 立体声。空时间轴写 0 帧 WAV。插件工程经临时实例表渲染（用后即毁，单线程安全）。
     /// </summary>
     public long ExportWav(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         RenderPlan plan = new DocumentCompiler().Compile(Document, _prepared);
-        _offlineRenderer.Load(plan);
-        using FileStream stream = File.Create(path);
-        // WavWriter 的 totalSamples 语义 = 交错样本总数（帧 × 声道），与 CLI 导出一致
-        WavWriter.WriteHeader(stream, plan.SampleRate, plan.Channels, plan.TotalSamples * plan.Channels);
-        var block = new float[ExportBlockFrames * plan.Channels];
-        for (long done = 0; done < plan.TotalSamples; done += ExportBlockFrames)
+        IReadOnlyList<Abstractions.Plugins.IAudioPluginInstance>? table = null;
+        PluginInstanceHost? host = null;
+        if (plan.PluginSlots.Length > 0 && _pluginFactory is not null)
         {
-            int count = (int)Math.Min(ExportBlockFrames, plan.TotalSamples - done);
-            Span<float> span = block.AsSpan(0, count * plan.Channels);
-            _offlineRenderer.Render(span);
-            WavWriter.WriteSamples(stream, span);
+            host = new PluginInstanceHost(_pluginFactory);
+            table = host.Sync(plan);
         }
-        return plan.TotalSamples;
+        try
+        {
+            _offlineRenderer.Load(plan, table);
+            using FileStream stream = File.Create(path);
+            // WavWriter 的 totalSamples 语义 = 交错样本总数（帧 × 声道），与 CLI 导出一致
+            WavWriter.WriteHeader(stream, plan.SampleRate, plan.Channels, plan.TotalSamples * plan.Channels);
+            var block = new float[ExportBlockFrames * plan.Channels];
+            for (long done = 0; done < plan.TotalSamples; done += ExportBlockFrames)
+            {
+                int count = (int)Math.Min(ExportBlockFrames, plan.TotalSamples - done);
+                Span<float> span = block.AsSpan(0, count * plan.Channels);
+                _offlineRenderer.Render(span);
+                WavWriter.WriteSamples(stream, span);
+            }
+            return plan.TotalSamples;
+        }
+        finally
+        {
+            host?.Dispose();
+        }
     }
 
     private void PrepareAssets()
