@@ -35,6 +35,8 @@ public sealed class Channel
     /// <summary>采样播放速率（SPEC M4 D3/D6：不变调，档位 {0.5,0.75,1.0,1.25,1.5,2.0} 近邻取整；
     /// 1.0 = 原路径位级不变）。仅 Sampler 通道有效。</summary>
     public double StretchSpeed { get; set; } = 1.0;
+    /// <summary>切片演奏开关（SPEC M4 D5：key=60+i 触发第 i 个切片；开启时 StretchSpeed 强制 1.0）。</summary>
+    public bool SliceMode { get; set; }
     /// <summary>插件参数静态值（SPEC M3 竖切 3）：编译进槽表，实例创建时 set。</summary>
     public List<PluginParameterValue> PluginParameters { get; } = [];
     /// <summary>插件 state chunk 的包内路径（presets/*.bin，SPEC M3 竖切 3）；空 = 无保存状态。</summary>

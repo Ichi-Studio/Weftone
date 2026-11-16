@@ -55,7 +55,7 @@ public sealed class DocumentCompiler
             }
             Pattern pattern = document.Patterns.First(p => p.Id == clip.PatternId);
             AddPatternVoices(pattern, clip.StartTick, channelById, assetIndexById,
-                curveIndexByChannel, pluginSlotByChannel, assets, num, den, voices);
+                curveIndexByChannel, pluginSlotByChannel, assets, document, num, den, voices);
         }
         return BuildPlan(document, assets, voices, totalTicks, loop: false, num, den, curves,
             BuildMasterCurve(document, totalTicks, num, den), pluginSlots, pluginParamEvents);
@@ -78,7 +78,7 @@ public sealed class DocumentCompiler
         RenderPluginParamEvent[] pluginParamEvents =
             BuildPluginParamEvents(document, pluginSlotByChannel, lengthTicks, num, den);
         var voices = new List<RenderVoice>();
-        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, assets, num, den, voices);
+        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, assets, document, num, den, voices);
         return BuildPlan(document, assets, voices, lengthTicks, loop: true, num, den, curves,
             BuildMasterCurve(document, lengthTicks, num, den), pluginSlots, pluginParamEvents);
     }
@@ -137,6 +137,17 @@ public sealed class DocumentCompiler
             }
         }
         return baseIndex;
+    }
+
+    /// <summary>资产切片点（SPEC M4 D4）；资产缺失返回空表。</summary>
+    private static List<long> SlicePointsOf(ProjectDocument document, string? assetId)
+    {
+        if (assetId is null)
+        {
+            return [];
+        }
+        AssetRef? asset = document.Assets.FirstOrDefault(a => a.Id == assetId);
+        return asset?.SlicePoints ?? [];
     }
 
     /// <summary>Plugin 通道 → 每通道一槽（各自独立实例）；引用缺失抛错（工程不完整）。</summary>
@@ -216,7 +227,7 @@ public sealed class DocumentCompiler
     private static void AddPatternVoices(Pattern pattern, long startTickOffset,
         Dictionary<int, Channel> channelById, Dictionary<string, int> assetIndexById,
         Dictionary<int, int> curveIndexByChannel, Dictionary<int, int> pluginSlotByChannel,
-        IReadOnlyList<PreparedAsset> assets, long num, long den, List<RenderVoice> voices)
+        IReadOnlyList<PreparedAsset> assets, ProjectDocument document, long num, long den, List<RenderVoice> voices)
     {
         foreach (Note note in pattern.Notes)
         {
@@ -225,6 +236,7 @@ public sealed class DocumentCompiler
             double gain = note.Velocity * channel.Volume;
             double frequency = 440.0 * Math.Pow(2.0, (note.Key - 69) / 12.0);
             int assetIndex = -1;
+            long assetOffsetFrames = 0;
             if (channel.Kind == ChannelKind.Sampler)
             {
                 if (channel.AssetId is null || !assetIndexById.TryGetValue(channel.AssetId, out assetIndex))
@@ -232,9 +244,20 @@ public sealed class DocumentCompiler
                     throw new InvalidOperationException($"sampler channel {channel.Id} 缺少已准备的资产");
                 }
                 // MIDI 60 = 原速；key 偏移即播放速率；变体（Speed=s）以 s 倍速还原时长（M4）
+                double speed = AssetPreparer.NearestStretchStep(channel.StretchSpeed);
                 assetIndex = SelectVariantAssetIndex(assets, assetIndexById, channel.AssetId, channel.StretchSpeed);
-                frequency = Math.Pow(2.0, (note.Key - 60) / 12.0)
-                    * AssetPreparer.NearestStretchStep(channel.StretchSpeed);
+                frequency = Math.Pow(2.0, (note.Key - 60) / 12.0) * speed;
+                if (channel.SliceMode)
+                {
+                    // 切片演奏（SPEC M4 D5）：key=60+i → 第 i 个切片；切片帧域与拉伸档位互斥
+                    int sliceIndex = note.Key - 60;
+                    List<long> slices = SlicePointsOf(document, channel.AssetId);
+                    if (sliceIndex < 0 || sliceIndex >= slices.Count)
+                    {
+                        continue; // 无对应切片：不出声（优雅跳过）
+                    }
+                    assetOffsetFrames = slices[sliceIndex];
+                }
             }
             if (channel.Kind == ChannelKind.Plugin)
             {
@@ -265,6 +288,7 @@ public sealed class DocumentCompiler
                 GainRight = curveIndex >= 0 ? (float)note.Velocity : (float)(gain * panRight),
                 AssetIndex = assetIndex,
                 GainCurveIndex = curveIndex,
+                AssetOffsetFrames = assetOffsetFrames,
             });
         }
     }

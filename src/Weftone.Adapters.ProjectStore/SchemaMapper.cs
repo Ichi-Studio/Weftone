@@ -96,6 +96,8 @@ internal sealed class AssetJson
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("path")] public string Path { get; set; } = "";
     [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
+    [JsonPropertyName("slicePoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<long>? SlicePoints { get; set; }
 }
 
 #pragma warning restore CA1812
@@ -144,6 +146,7 @@ internal static class SchemaMapper
             Assets = document.Assets.Select(a => new AssetJson
             {
                 Id = a.Id, Path = a.Path, Sha256 = a.Sha256,
+                SlicePoints = a.SlicePoints.Count == 0 ? null : [.. a.SlicePoints],
             }).ToList(),
         };
     }
@@ -217,7 +220,19 @@ internal static class SchemaMapper
             Require(!string.IsNullOrWhiteSpace(a.Id), "asset id 为空");
             Require(a.Path.StartsWith("assets/", StringComparison.Ordinal), $"asset 路径越界: {a.Path}");
             Require(IsHex64(a.Sha256), $"asset sha256 非法: {a.Sha256}");
-            document.Assets.Add(new AssetRef { Id = a.Id, Path = a.Path, Sha256 = a.Sha256 });
+            var assetRef = new AssetRef { Id = a.Id, Path = a.Path, Sha256 = a.Sha256 };
+            if (a.SlicePoints is not null)
+            {
+                long previous = -1;
+                foreach (long frame in a.SlicePoints)
+                {
+                    Require(frame >= 0, $"asset {a.Id} 切片帧越界: {frame}");
+                    Require(frame > previous, $"asset {a.Id} 切片帧未严格升序: {frame}");
+                    previous = frame;
+                    assetRef.SlicePoints.Add(frame);
+                }
+            }
+            document.Assets.Add(assetRef);
         }
 
         foreach (ChannelJson c in json.Channels)

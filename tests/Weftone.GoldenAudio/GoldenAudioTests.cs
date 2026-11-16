@@ -406,6 +406,93 @@ public class GoldenAudioTests
         Assert.That(peakDifference, Is.LessThanOrEqualTo(2e-2), "拉伸黄金回归超差");
     }
 
+    /// <summary>M4 切片黄金基线：kick 三切片（0/800/1600 帧），key=60/61/62 各触发一片。</summary>
+    private static string SliceBaselinePath
+    {
+        get
+        {
+            var dir = new DirectoryInfo(TestContext.CurrentContext.TestDirectory);
+            while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                dir = dir.Parent!;
+            }
+            string root = dir?.FullName ?? TestContext.CurrentContext.TestDirectory;
+            return Path.Combine(root, "tests", "Weftone.GoldenAudio", "baselines", "m4-slice-golden.wav");
+        }
+    }
+
+    private string CreateSlicePackage()
+    {
+        string kickPath = Path.Combine(_workDir, "kick.wav");
+        DemoProject.WriteKickWav(kickPath);
+        var document = new ProjectDocument { Tempo = DemoProject.Tempo, SampleRate = DemoProject.SampleRate };
+        var asset = new AssetRef { Id = "asset-kick", Path = "assets/kick.wav" };
+        asset.SlicePoints.AddRange([0, 800, 1600]);
+        document.Assets.Add(asset);
+        document.Channels.Add(new Channel
+        {
+            Id = 1, Name = "Slicer", Kind = ChannelKind.Sampler,
+            AssetId = "asset-kick", SliceMode = true, Volume = 0.8,
+        });
+        var pattern = new Pattern { Id = 10, Name = "SliceDemo" };
+        pattern.Notes.Add(new Note { ChannelId = 1, Tick = 0, Key = 60, Velocity = 1.0, LengthTicks = 96 });
+        pattern.Notes.Add(new Note { ChannelId = 1, Tick = 192, Key = 61, Velocity = 1.0, LengthTicks = 96 });
+        pattern.Notes.Add(new Note { ChannelId = 1, Tick = 384, Key = 62, Velocity = 1.0, LengthTicks = 96 });
+        document.Patterns.Add(pattern);
+        document.Playlist.Add(new Clip { PatternId = 10, StartTick = 0 });
+        string package = Path.Combine(_workDir, "m4-slice.weft");
+        new WeftProjectStore().Save(package, document,
+            new Dictionary<string, string> { ["assets/kick.wav"] = kickPath });
+        return package;
+    }
+
+    [Test]
+    public void Slice_render_is_bitwise_deterministic_in_process()
+    {
+        string package = CreateSlicePackage();
+        RenderedProject first = NewService().Render(package);
+        RenderedProject second = NewService().Render(package);
+        Assert.Multiple(() =>
+        {
+            Assert.That(second.Interleaved, Is.EqualTo(first.Interleaved), "切片路径位级确定");
+            Assert.That(first.Peak, Is.GreaterThan(0.1), "切片出声");
+        });
+    }
+
+    [Test]
+    public void Slice_render_matches_baseline_within_cross_platform_tolerance()
+    {
+        string package = CreateSlicePackage();
+        RenderedProject rendered = NewService().Render(package);
+
+        if (Environment.GetEnvironmentVariable("WEFTONE_GOLDEN_UPDATE") == "1")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(SliceBaselinePath)!);
+            using FileStream stream = File.Create(SliceBaselinePath);
+            WavWriter.WriteHeader(stream, rendered.SampleRate, rendered.Channels, rendered.Interleaved.Length);
+            WavWriter.WriteSamples(stream, rendered.Interleaved);
+            Assert.Warn($"基线已更新: {SliceBaselinePath}（请提交）");
+            return;
+        }
+
+        Assert.That(File.Exists(SliceBaselinePath), Is.True,
+            $"缺少基线 {SliceBaselinePath}；本地设 WEFTONE_GOLDEN_UPDATE=1 生成后提交");
+        float[] baseline = ReadFloatWav(SliceBaselinePath);
+        Assert.That(baseline.Length, Is.EqualTo(rendered.Interleaved.Length), "样本数与基线不一致");
+
+        double peakDifference = 0;
+        for (int i = 0; i < baseline.Length; i++)
+        {
+            double difference = Math.Abs(baseline[i] - rendered.Interleaved[i]);
+            if (difference > peakDifference)
+            {
+                peakDifference = difference;
+            }
+        }
+        TestContext.Out.WriteLine($"切片黄金对比: 样本 {baseline.Length}，峰值差 {peakDifference:0.0e0}");
+        Assert.That(peakDifference, Is.LessThanOrEqualTo(1e-4), "切片黄金音频回归超差");
+    }
+
     private static float[] ReadFloatWav(string path)
     {
         byte[] all = File.ReadAllBytes(path);

@@ -27,6 +27,8 @@ public struct RenderVoice
     public int NoteKey;
     /// <summary>音符力度（0..1），Kind==Plugin 时传给插件 note 事件。</summary>
     public float Velocity;
+    /// <summary>资产内起始帧（SPEC M4 竖切 2：切片起播偏移）；Kind==Sampler 时生效，0 = 从头播。</summary>
+    public long AssetOffsetFrames;
 
     public RenderVoice()
     {

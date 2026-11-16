@@ -488,7 +488,7 @@ public sealed class PlanRenderer : IPlanRenderer
             PhaseDelta = voice.Kind == RenderVoiceKind.Sine && plan.SampleRate > 0
                 ? TwoPi * voice.Frequency / plan.SampleRate
                 : 0,
-            AssetPosition = 0,
+            AssetPosition = voice.AssetOffsetFrames,
             Asset = voice.AssetIndex >= 0 ? plan.Assets[voice.AssetIndex] : null,
             Frequency = voice.Frequency,
             GainLeft = voice.GainLeft,
