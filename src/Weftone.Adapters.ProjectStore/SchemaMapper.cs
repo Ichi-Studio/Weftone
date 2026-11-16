@@ -63,6 +63,7 @@ internal sealed class EffectJson
     [JsonPropertyName("kind")] public string Kind { get; set; } = "";
     [JsonPropertyName("bypassed")] public bool Bypassed { get; set; }
     [JsonPropertyName("parameters")] public Dictionary<string, double>? Parameters { get; set; }
+    [JsonPropertyName("parameterLanes")] public Dictionary<string, List<AutomationPointJson>>? ParameterLanes { get; set; }
 }
 
 /// <summary>插件引用（SPEC M3）：id ↔ channel.pluginId；path 为本地 .clap 路径（插件不入包）。</summary>
@@ -137,6 +138,7 @@ internal static class SchemaMapper
                         Kind = e.Kind.ToString(),
                         Bypassed = e.Bypassed,
                         Parameters = e.Parameters.Count == 0 ? null : new Dictionary<string, double>(e.Parameters),
+                        ParameterLanes = MapEffectLanes(e),
                     }).ToList(),
                 PluginParameters = c.PluginParameters.Count == 0
                     ? null
@@ -209,6 +211,15 @@ internal static class SchemaMapper
                         {
                             Require(double.IsFinite(param.Value), $"效果参数非有限值: {param.Key}={param.Value}");
                             slot.Parameters[param.Key] = param.Value;
+                        }
+                    }
+                    if (e.ParameterLanes is not null)
+                    {
+                        foreach (KeyValuePair<string, List<AutomationPointJson>> lane in e.ParameterLanes)
+                        {
+                            slot.GetParameterLane(lane.Key).AddRange(ParseLane(lane.Value,
+                                $"effect {e.Kind} parameterLanes[{lane.Key}]",
+                                double.MinValue, double.MaxValue));
                         }
                     }
                     document.Channels[^1].Effects.Slots.Add(slot);
@@ -374,6 +385,22 @@ internal static class SchemaMapper
     }
 
     /// <summary>空 lane 写 null 省略（旧文件无字段加载为空，双向兼容，SPEC M2）。</summary>
+    private static Dictionary<string, List<AutomationPointJson>>? MapEffectLanes(EffectSlot slot)
+    {
+        Dictionary<string, List<AutomationPointJson>>? lanes = null;
+        foreach (string name in slot.AutomatedParameterNames)
+        {
+            List<AutomationPoint> points = slot.GetParameterLane(name);
+            if (points.Count == 0)
+            {
+                continue;
+            }
+            lanes ??= [];
+            lanes[name] = points.Select(p => new AutomationPointJson { Tick = p.Tick, Value = p.Value }).ToList();
+        }
+        return lanes;
+    }
+
     private static List<AutomationPointJson>? MapLane(List<AutomationPoint> points)
         => points.Count == 0
             ? null

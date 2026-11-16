@@ -35,6 +35,8 @@ public sealed class PlanRenderer : IPlanRenderer
         public Effects.IEffectProcessor?[][] ChannelEffects = [];
         /// <summary>每通道 interleaved 缓冲（效果链挂板，预分配）。</summary>
         public float[][] ChannelBuffers = [];
+        /// <summary>每节点参数工作副本（曲线写此不触 plan）。</summary>
+        public double[][] EffectParameters = [];
         /// <summary>每槽事件 scratch（表构造线程预分配，音频线程只写不扩）。</summary>
         public PluginEvent[][] Scratch = [];
         /// <summary>每槽最近通道增益（note off 后的 release 尾巴沿用；同通道同值）。</summary>
@@ -160,6 +162,11 @@ public sealed class PlanRenderer : IPlanRenderer
         }
         state.ChannelEffects = new Effects.IEffectProcessor?[channels][];
         state.ChannelBuffers = new float[channels][];
+        state.EffectParameters = new double[plan.EffectNodes.Length][];
+        for (int n = 0; n < plan.EffectNodes.Length; n++)
+        {
+            state.EffectParameters[n] = [.. plan.EffectNodes[n].Parameters];
+        }
         for (int c = 0; c < channels; c++)
         {
             state.ChannelEffects[c] = [.. chains[c]];
@@ -319,6 +326,7 @@ public sealed class PlanRenderer : IPlanRenderer
 
         // 效果链通道缓冲清零（SPEC M5 D2：voice 按通道分组，效果后混入总线）
         bool hasEffects = state.ChannelBuffers.Length > 0;
+        int nodeGlobalIndex = 0;
         if (hasEffects)
         {
             for (int c = 0; c < state.ChannelBuffers.Length; c++)
@@ -364,9 +372,38 @@ public sealed class PlanRenderer : IPlanRenderer
                     continue;
                 }
                 Span<float> channelSpan = buffer.AsSpan(0, frames * 2);
-                foreach (Effects.IEffectProcessor? effect in state.ChannelEffects[c])
+                int nodeCursor = 0;
+                foreach (Abstractions.Plugins.RenderEffectNode node in plan.EffectNodes)
                 {
-                    effect?.Process(channelSpan, frames);
+                    if (node.ChannelIndex != c || node.Bypassed)
+                    {
+                        nodeGlobalIndex++;
+                        continue;
+                    }
+                    if (nodeCursor >= state.ChannelEffects[c].Length)
+                    {
+                        break;
+                    }
+                    Effects.IEffectProcessor? effect = state.ChannelEffects[c][nodeCursor++];
+                    if (effect is null)
+                    {
+                        continue;
+                    }
+                    if (node.ParameterCurves is { } curves && nodeGlobalIndex < state.EffectParameters.Length)
+                    {
+                        double[] working = state.EffectParameters[nodeGlobalIndex];
+                        for (int pi = 0; pi < curves.Length && pi < working.Length; pi++)
+                        {
+                            if (curves[pi] is not { } curve || curve.Length == 0)
+                            {
+                                continue;
+                            }
+                            working[pi] = EvaluateEffectCurve(curve, segmentStart);
+                        }
+                        effect.SetParameters(working);
+                    }
+                    effect.Process(channelSpan, frames);
+                    nodeGlobalIndex++;
                 }
                 for (int i = 0; i < channelSpan.Length; i++)
                 {
@@ -414,6 +451,25 @@ public sealed class PlanRenderer : IPlanRenderer
 
         FillSlotsFromPending(plan);
         _position = end;
+    }
+
+    /// <summary>效果参数曲线块级取值：断点 bracket 线性插值（首末 clamp）。</summary>
+    private static double EvaluateEffectCurve(GainBreakpoint[] curve, long position)
+    {
+        if (curve.Length == 1 || position <= curve[0].Sample)
+        {
+            return curve[0].GainLeft;
+        }
+        for (int i = 1; i < curve.Length; i++)
+        {
+            if (position < curve[i].Sample)
+            {
+                long span = curve[i].Sample - curve[i - 1].Sample;
+                double t = span <= 0 ? 1 : (double)(position - curve[i - 1].Sample) / span;
+                return curve[i - 1].GainLeft + (curve[i].GainLeft - curve[i - 1].GainLeft) * t;
+            }
+        }
+        return curve[^1].GainLeft;
     }
 
     /// <summary>插件声部段渲染：note on/off 窗口按 256 帧 chunk 派发给实例，

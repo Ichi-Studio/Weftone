@@ -5,6 +5,10 @@ namespace Weftone.Engine.Effects;
 public interface IEffectProcessor
 {
     void Process(Span<float> interleaved, int frames);
+
+    /// <summary>块首更新参数（SPEC M5 D3：自动化曲线块级阶梯）；零分配。
+    /// 时间类参数（延迟长度/混响衰减）构造期固定，调用方可变项即时生效。</summary>
+    void SetParameters(double[] parameters);
 }
 
 /// <summary>
@@ -24,12 +28,22 @@ public sealed class Eq3BandProcessor : IEffectProcessor
 
     public Eq3BandProcessor(double lowGainDb, double midGainDb, double highGainDb)
     {
-        DesignShelf(ref _filters[0], 200.0, lowGainDb, lowShelf: true);
-        DesignShelf(ref _filters[1], 200.0, lowGainDb, lowShelf: true);
-        DesignPeak(ref _filters[2], 1000.0, midGainDb);
-        DesignPeak(ref _filters[3], 1000.0, midGainDb);
-        DesignShelf(ref _filters[4], 4000.0, highGainDb, lowShelf: false);
-        DesignShelf(ref _filters[5], 4000.0, highGainDb, lowShelf: false);
+        SetParameters([lowGainDb, midGainDb, highGainDb]);
+    }
+
+    public void SetParameters(double[] parameters)
+    {
+        double low = parameters.Length > 0 ? parameters[0] : 0;
+        double mid = parameters.Length > 1 ? parameters[1] : 0;
+        double high = parameters.Length > 2 ? parameters[2] : 0;
+        double x1l = _filters[0].X1, x2l = _filters[0].X2, y1l = _filters[0].Y1, y2l = _filters[0].Y2;
+        DesignShelf(ref _filters[0], 200.0, low, lowShelf: true);
+        DesignShelf(ref _filters[1], 200.0, low, lowShelf: true);
+        DesignPeak(ref _filters[2], 1000.0, mid);
+        DesignPeak(ref _filters[3], 1000.0, mid);
+        DesignShelf(ref _filters[4], 4000.0, high, lowShelf: false);
+        DesignShelf(ref _filters[5], 4000.0, high, lowShelf: false);
+        // 系数重设保留各 biquad 自身状态（Design* 只改系数）——首建时状态本为零
     }
 
     public void Process(Span<float> interleaved, int frames)

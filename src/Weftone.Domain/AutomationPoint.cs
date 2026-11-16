@@ -6,6 +6,8 @@ public enum AutomationParameter
     Pan,
     /// <summary>插件参数自动化（SPEC M3 竖切 4）：PluginParamId 标识参数，值域由插件定义（宽松校验）。</summary>
     PluginParam,
+    /// <summary>效果参数自动化（SPEC M5 D3）：EffectSlotIndex 标识通道链内槽序，宽松值域。</summary>
+    EffectParam,
 }
 
 /// <summary>自动化目标：普通通道（vol/pan/插件参数）或主控（master 仅有 volume）。</summary>
@@ -13,14 +15,17 @@ public readonly record struct AutomationTarget
 {
     public bool IsMaster { get; }
     public int ChannelId { get; }
-    /// <summary>AutomationParameter == PluginParam 时有效。</summary>
+    /// <summary>AutomationParameter == PluginParam 时为插件参数 id；== EffectParam 时为效果槽序号。</summary>
     public uint PluginParamId { get; }
+    /// <summary>AutomationParameter == EffectParam 时的效果参数名。</summary>
+    public string? EffectParameterName { get; }
 
-    private AutomationTarget(bool isMaster, int channelId, uint pluginParamId)
+    private AutomationTarget(bool isMaster, int channelId, uint pluginParamId, string? effectParameterName = null)
     {
         IsMaster = isMaster;
         ChannelId = channelId;
         PluginParamId = pluginParamId;
+        EffectParameterName = effectParameterName;
     }
 
     public static AutomationTarget Master { get; } = new(true, 0, 0);
@@ -29,6 +34,12 @@ public readonly record struct AutomationTarget
 
     public static AutomationTarget PluginParameter(int channelId, uint paramId) =>
         new(false, channelId, paramId);
+
+    public static AutomationTarget EffectParameter(int channelId, int slotIndex, string parameterName) =>
+        new(false, channelId, unchecked((uint)slotIndex), parameterName);
+
+    /// <summary>AutomationParameter == EffectParam 时：效果槽序号。</summary>
+    public int EffectSlotIndex => unchecked((int)PluginParamId);
 
     public override string ToString() => IsMaster ? "master" : $"ch{ChannelId}";
 }
@@ -53,6 +64,7 @@ public static class AutomationLanes
         AutomationParameter.Volume => (0.0, 2.0),
         AutomationParameter.Pan => (-1.0, 1.0),
         AutomationParameter.PluginParam => (-1e9, 1e9),
+        AutomationParameter.EffectParam => (-1e9, 1e9),
         _ => throw new ArgumentOutOfRangeException(nameof(parameter)),
     };
 
@@ -75,6 +87,15 @@ public static class AutomationLanes
         if (parameter == AutomationParameter.PluginParam)
         {
             return channel.GetPluginParamPoints(target.PluginParamId);
+        }
+        if (parameter == AutomationParameter.EffectParam)
+        {
+            int slotIndex = unchecked((int)target.PluginParamId);
+            if (slotIndex < 0 || slotIndex >= channel.Effects.Slots.Count)
+            {
+                throw new InvalidOperationException($"channel {target.ChannelId} 无效果槽 #{slotIndex}");
+            }
+            return channel.Effects.Slots[slotIndex].GetParameterLane(target.EffectParameterName ?? "");
         }
         return parameter == AutomationParameter.Volume ? channel.VolumePoints : channel.PanPoints;
     }

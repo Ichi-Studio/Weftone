@@ -48,7 +48,7 @@ public sealed class DocumentCompiler
             BuildPluginParamEvents(document, pluginSlotByChannel, totalTicks, num, den);
         var channelIndexById = new Dictionary<int, int>();
         Abstractions.Plugins.RenderEffectNode[] effectNodes =
-            BuildEffectNodes(document, channelIndexById);
+            BuildEffectNodes(document, channelIndexById, totalTicks, num, den);
         var voices = new List<RenderVoice>();
         foreach (Clip clip in document.Playlist.OrderBy(c => c.StartTick))
         {
@@ -84,7 +84,7 @@ public sealed class DocumentCompiler
             BuildPluginParamEvents(document, pluginSlotByChannel, lengthTicks, num, den);
         var channelIndexById = new Dictionary<int, int>();
         Abstractions.Plugins.RenderEffectNode[] effectNodes =
-            BuildEffectNodes(document, channelIndexById);
+            BuildEffectNodes(document, channelIndexById, lengthTicks, num, den);
         var voices = new List<RenderVoice>();
         AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, assets, document, channelIndexById, num, den, voices);
         return BuildPlan(document, assets, voices, lengthTicks, loop: true, num, den, curves,
@@ -151,7 +151,8 @@ public sealed class DocumentCompiler
     /// <summary>通道效果链 → plan 效果节点（SPEC M5 D2）：仅含带效果链的通道；
     /// channelIndexById 记录通道 id → 通道索引（voice.ChannelIndex 用）。</summary>
     private static Abstractions.Plugins.RenderEffectNode[] BuildEffectNodes(
-        ProjectDocument document, Dictionary<int, int> channelIndexById)
+        ProjectDocument document, Dictionary<int, int> channelIndexById,
+        long totalTicks, long num, long den)
     {
         var nodes = new List<Abstractions.Plugins.RenderEffectNode>();
         int index = 0;
@@ -164,17 +165,99 @@ public sealed class DocumentCompiler
             channelIndexById[channel.Id] = index++;
             foreach (EffectSlot slot in channel.Effects.Slots)
             {
+                double[] parameters = CompileEffectParameters(slot);
+                GainBreakpoint[][]? curves = CompileEffectParameterCurves(slot, parameters,
+                    totalTicks, num, den);
                 nodes.Add(new Abstractions.Plugins.RenderEffectNode
                 {
                     ChannelIndex = channelIndexById[channel.Id],
                     Kind = slot.Kind.ToString(),
-                    Parameters = CompileEffectParameters(slot),
+                    Parameters = parameters,
+                    ParameterCurves = curves,
                     Bypassed = slot.Bypassed,
                 });
             }
         }
         return [.. nodes];
     }
+
+    /// <summary>效果参数 lane → 每参数断点曲线（SPEC M5 D3）：lane 非空的参数位得曲线
+    /// （Sample 域 clamp 首末），否则 null（该位静态值）。参数名→序由 CompileEffectParameters 序。</summary>
+    private static GainBreakpoint[][]? CompileEffectParameterCurves(EffectSlot slot,
+        double[] staticParameters, long totalTicks, long num, long den)
+    {
+        string[] names = EffectParameterNames(slot.Kind);
+        GainBreakpoint[][]? curves = null;
+        foreach (string name in slot.AutomatedParameterNames)
+        {
+            List<AutomationPoint> lane = slot.GetParameterLane(name);
+            if (lane.Count == 0)
+            {
+                continue;
+            }
+            int order = Array.IndexOf(names, name);
+            if (order < 0 || order >= staticParameters.Length)
+            {
+                continue;
+            }
+            curves ??= new GainBreakpoint[staticParameters.Length][];
+            long totalSamples = TickMath.TicksToSamples(totalTicks, num, den);
+            double fallback = staticParameters[order];
+            curves[order] = BuildEffectCurve(lane, fallback, totalTicks, totalSamples, num, den);
+        }
+        return curves;
+    }
+
+    /// <summary>效果参数曲线：并集点 + 首末 clamp（GainLeft 存参数值，GainRight 冗余同值）。</summary>
+    private static GainBreakpoint[] BuildEffectCurve(List<AutomationPoint> lane, double fallback,
+        long totalTicks, long totalSamples, long num, long den)
+    {
+        var breakpoints = new List<GainBreakpoint>(lane.Count + 2)
+        {
+            new GainBreakpoint { Sample = 0, GainLeft = (float)AutomationMath.Evaluate(lane, fallback, 0) },
+        };
+        foreach (AutomationPoint point in lane)
+        {
+            long sample = TickMath.TicksToSamples(point.Tick, num, den);
+            if (sample <= 0 || (totalSamples > 0 && sample >= totalSamples))
+            {
+                continue;
+            }
+            breakpoints.Add(new GainBreakpoint { Sample = sample, GainLeft = (float)point.Value });
+        }
+        if (totalSamples > 0)
+        {
+            double endValue = AutomationMath.Evaluate(lane, fallback, totalTicks);
+            if (breakpoints[^1].Sample >= totalSamples)
+            {
+                breakpoints[^1] = new GainBreakpoint { Sample = totalSamples, GainLeft = (float)endValue };
+            }
+            else
+            {
+                breakpoints.Add(new GainBreakpoint { Sample = totalSamples, GainLeft = (float)endValue });
+            }
+        }
+        for (int i = 0; i < breakpoints.Count; i++)
+        {
+            breakpoints[i] = new GainBreakpoint
+            {
+                Sample = breakpoints[i].Sample,
+                GainLeft = breakpoints[i].GainLeft,
+                GainRight = breakpoints[i].GainLeft,
+            };
+        }
+        return [.. breakpoints];
+    }
+
+    /// <summary>效果参数定序名（与 CompileEffectParameters 对齐）。</summary>
+    private static string[] EffectParameterNames(EffectKind kind) => kind switch
+    {
+        EffectKind.Eq3Band => ["low", "mid", "high"],
+        EffectKind.Compressor => ["threshold", "ratio", "attack", "release"],
+        EffectKind.Delay => ["timeMs", "feedback", "mix"],
+        EffectKind.Reverb => ["decaySeconds", "size", "preDelayMs"],
+        _ => [],
+    };
 
     /// <summary>效果槽参数 → plan 定序数组（Eq3Band: [low, mid, high] dB，缺省 0）。</summary>
     private static double[] CompileEffectParameters(EffectSlot slot)

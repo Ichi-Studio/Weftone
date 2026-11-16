@@ -23,6 +23,22 @@ public sealed class EffectSlot
     public Dictionary<string, double> Parameters { get; } = [];
     /// <summary>旁通（保留参数与自动化位置，仅不参与处理）。</summary>
     public bool Bypassed { get; set; }
+
+    private readonly Dictionary<string, List<AutomationPoint>> _parameterLanes = [];
+
+    /// <summary>效果参数自动化 lane（SPEC M5 D3）：参数名 → 点列表（升序唯一）。</summary>
+    public List<AutomationPoint> GetParameterLane(string parameterName)
+    {
+        if (!_parameterLanes.TryGetValue(parameterName, out List<AutomationPoint>? lane))
+        {
+            lane = [];
+            _parameterLanes[parameterName] = lane;
+        }
+        return lane;
+    }
+
+    /// <summary>带自动化点的参数名集合。</summary>
+    public IReadOnlyCollection<string> AutomatedParameterNames => _parameterLanes.Keys;
 }
 
 /// <summary>通道效果链（SPEC M5）：顺序即数组序；引擎侧按顺序串联。</summary>

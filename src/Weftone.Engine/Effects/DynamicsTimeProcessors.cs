@@ -6,17 +6,24 @@ namespace Weftone.Engine.Effects;
 /// </summary>
 public sealed class CompressorProcessor : IEffectProcessor
 {
-    private readonly double _thresholdDb;
-    private readonly double _ratio;
-    private readonly double _attackCoeff;
-    private readonly double _releaseCoeff;
+    private double _thresholdDb;
+    private double _ratio;
+    private double _attackCoeff;
+    private double _releaseCoeff;
     private double _envelope;
 
     public CompressorProcessor(double thresholdDb, double ratio, double attackMs, double releaseMs)
     {
-        _thresholdDb = thresholdDb;
-        _ratio = Math.Clamp(ratio, 1.0, 20.0);
-        _attackCoeff = attackMs <= 0 ? 0 : Math.Exp(-1.0 / (attackMs * 48.0));   // 48000/1000
+        SetParameters([thresholdDb, ratio, attackMs, releaseMs]);
+    }
+
+    public void SetParameters(double[] parameters)
+    {
+        _thresholdDb = parameters.Length > 0 ? parameters[0] : -24;
+        _ratio = Math.Clamp(parameters.Length > 1 ? parameters[1] : 4, 1.0, 20.0);
+        double attackMs = parameters.Length > 2 ? parameters[2] : 10;
+        double releaseMs = parameters.Length > 3 ? parameters[3] : 100;
+        _attackCoeff = attackMs <= 0 ? 0 : Math.Exp(-1.0 / (attackMs * 48.0));
         _releaseCoeff = releaseMs <= 0 ? 0 : Math.Exp(-1.0 / (releaseMs * 48.0));
     }
 
@@ -51,16 +58,22 @@ public sealed class DelayProcessor : IEffectProcessor
 {
     private const int MaxSamples = 96_000; // 2s @48k
     private readonly double[] _lines;
-    private readonly double _feedback;
-    private readonly double _mix;
+    private double _feedback;
+    private double _mix;
     private int _position;
 
     public DelayProcessor(double timeMs, double feedback, double mix)
     {
         int delaySamples = Math.Clamp((int)(timeMs * 48.0), 1, MaxSamples - 1);
         _lines = new double[delaySamples * 2]; // 环长 = 延迟长度（写前读 → 恰好延迟 N 样本）
-        _feedback = Math.Clamp(feedback, 0, 0.95);
-        _mix = Math.Clamp(mix, 0, 1);
+        SetParameters([timeMs, feedback, mix]);
+    }
+
+    public void SetParameters(double[] parameters)
+    {
+        // 时间长度构造期固定（缓冲不可变）；反馈/混合即时生效
+        _feedback = Math.Clamp(parameters.Length > 1 ? parameters[1] : 0.3, 0, 0.95);
+        _mix = Math.Clamp(parameters.Length > 2 ? parameters[2] : 0.3, 0, 1);
     }
 
     public void Process(Span<float> interleaved, int frames)
@@ -96,15 +109,26 @@ public sealed class ReverbProcessor : IEffectProcessor
     private readonly int _preDelay;
     private readonly double[] _preDelayBuffer;
     private int _preDelayPosition;
-    private readonly double _feedback;
+    private double _feedback;
 
     private static readonly int[] BaseLengths = [1423, 1913, 2371, 2917]; // 互质延迟（无金属感）
+    private double _lengthsScale;
+
+    public void SetParameters(double[] parameters)
+    {
+        // 衰减时间即时生效（改反馈系数）；尺寸/预延迟构造期固定（缓冲不可变）
+        double decaySeconds = parameters.Length > 0 ? parameters[0] : 1.5;
+        double feedback = decaySeconds <= 0 ? 0
+            : Math.Pow(0.001, BaseLengths[0] * _lengthsScale / (decaySeconds * 48_000.0));
+        _feedback = Math.Clamp(feedback, 0, 0.98);
+    }
 
     public ReverbProcessor(double decaySeconds, double size, double preDelayMs)
     {
         double scale = 0.6 + Math.Clamp(size, 0, 1) * 0.8;
         double feedback = decaySeconds <= 0 ? 0 : Math.Pow(0.001, BaseLengths[0] * scale / (decaySeconds * 48_000.0));
         _feedback = Math.Clamp(feedback, 0, 0.98);
+        _lengthsScale = scale;
         _preDelay = Math.Clamp((int)(Math.Clamp(preDelayMs, 0, 200) * 48.0), 0, 9600);
         _preDelayBuffer = new double[Math.Max(1, _preDelay) * 2];
         for (int i = 0; i < Lines; i++)
