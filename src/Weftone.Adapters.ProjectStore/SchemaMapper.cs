@@ -35,6 +35,7 @@ internal sealed class ChannelJson
     [JsonPropertyName("pan")] public double Pan { get; set; }
     [JsonPropertyName("assetId")] public string? AssetId { get; set; }
     [JsonPropertyName("pluginId")] public string? PluginId { get; set; }
+    [JsonPropertyName("stretchSpeed")] public double? StretchSpeed { get; set; }
     [JsonPropertyName("pluginParameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PluginParamJson>? PluginParameters { get; set; }
     [JsonPropertyName("pluginParamPoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -116,6 +117,7 @@ internal static class SchemaMapper
                 Volume = c.Volume, Pan = c.Pan, AssetId = c.AssetId, PluginId = c.PluginId,
                 PluginState = c.PluginStateEntry,
                 PluginStateSha256 = c.PluginStateSha256,
+                StretchSpeed = c.StretchSpeed == 1.0 ? null : c.StretchSpeed,
                 PluginParameters = c.PluginParameters.Count == 0
                     ? null
                     : c.PluginParameters.Select(p => new PluginParamJson { Id = p.Id, Value = p.Value }).ToList(),
@@ -169,6 +171,7 @@ internal static class SchemaMapper
                 PluginId = c.PluginId,
                 PluginStateEntry = c.PluginState,
                 PluginStateSha256 = c.PluginStateSha256,
+                StretchSpeed = c.StretchSpeed ?? 1.0,
             });
             if (c.PluginParameters is not null)
             {
@@ -236,6 +239,10 @@ internal static class SchemaMapper
                 Require(c.PluginState!.StartsWith("presets/", StringComparison.Ordinal),
                     $"channel {c.Id} 插件状态路径越界: {c.PluginState}");
                 Require(IsHex64(c.PluginStateSha256 ?? ""), $"channel {c.Id} 插件状态 SHA256 非法");
+            }
+            if (c.StretchSpeed is { } speed)
+            {
+                Require(speed >= 0.25 && speed <= 4.0, $"channel {c.Id} stretchSpeed 越界: {speed}");
             }
             Require(c.Volume is >= 0 and <= 2, $"channel {c.Id} 音量越界: {c.Volume}");
             Require(c.Pan is >= -1 and <= 1, $"channel {c.Id} 声像越界: {c.Pan}");

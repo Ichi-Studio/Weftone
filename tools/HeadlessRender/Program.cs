@@ -117,7 +117,8 @@ static string Next(string[] args, ref int i)
 }
 
 static ProjectRenderService NewRenderService() => new(
-    new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
+    new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer(),
+    stretcher: new Weftone.Adapters.Dsp.SignalsmithStretcher());
 
 static int ProjectRender(string path, string output)
 {

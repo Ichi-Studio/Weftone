@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\src\Weftone.Engine\Weftone.Engine.csproj" />
     <ProjectReference Include="..\..\src\Weftone.Adapters.Audio.Miniaudio\Weftone.Adapters.Audio.Miniaudio.csproj" />
     <ProjectReference Include="..\..\src\Weftone.Adapters.Codecs\Weftone.Adapters.Codecs.csproj" />
+    <ProjectReference Include="..\..\src\Weftone.Adapters.Dsp\Weftone.Adapters.Dsp.csproj" />
     <ProjectReference Include="..\..\src\Weftone.Adapters.ProjectStore\Weftone.Adapters.ProjectStore.csproj" />
   </ItemGroup>
 

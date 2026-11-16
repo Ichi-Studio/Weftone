@@ -29,7 +29,8 @@ public class GoldenAudioTests
     public void TearDown() => Directory.Delete(_workDir, recursive: true);
 
     private ProjectRenderService NewService() => new(
-        new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
+        new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer(),
+        stretcher: new Adapters.Dsp.SignalsmithStretcher());
 
     private string CreateGoldenPackage()
     {
@@ -316,6 +317,93 @@ public class GoldenAudioTests
         }
         TestContext.Out.WriteLine($"插件黄金对比: 样本 {baseline.Length}，峰值差 {peakDifference:0.0e0}");
         Assert.That(peakDifference, Is.LessThanOrEqualTo(1e-4), "插件黄金音频回归超差");
+    }
+
+    /// <summary>M4 拉伸黄金基线：kick 通道 StretchSpeed=0.5（不变调拉长 2×）。</summary>
+    private static string StretchBaselinePath
+    {
+        get
+        {
+            var dir = new DirectoryInfo(TestContext.CurrentContext.TestDirectory);
+            while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                dir = dir.Parent!;
+            }
+            string root = dir?.FullName ?? TestContext.CurrentContext.TestDirectory;
+            return Path.Combine(root, "tests", "Weftone.GoldenAudio", "baselines", "m4-stretch-golden.wav");
+        }
+    }
+
+    private string CreateStretchPackage()
+    {
+        string kickPath = Path.Combine(_workDir, "kick.wav");
+        DemoProject.WriteKickWav(kickPath);
+        var document = new ProjectDocument { Tempo = DemoProject.Tempo, SampleRate = DemoProject.SampleRate };
+        document.Assets.Add(new AssetRef { Id = "asset-kick", Path = "assets/kick.wav" });
+        document.Channels.Add(new Channel
+        {
+            Id = 1, Name = "SlowKick", Kind = ChannelKind.Sampler,
+            AssetId = "asset-kick", StretchSpeed = 0.5, Volume = 0.8,
+        });
+        var pattern = new Pattern { Id = 10, Name = "StretchDemo" };
+        foreach (long tick in (long[])[0, 192, 384])
+        {
+            pattern.Notes.Add(new Note { ChannelId = 1, Tick = tick, Key = 60, Velocity = 1.0, LengthTicks = 96 });
+        }
+        document.Patterns.Add(pattern);
+        document.Playlist.Add(new Clip { PatternId = 10, StartTick = 0 });
+        string package = Path.Combine(_workDir, "m4-stretch.weft");
+        new WeftProjectStore().Save(package, document,
+            new Dictionary<string, string> { ["assets/kick.wav"] = kickPath });
+        return package;
+    }
+
+    [Test]
+    public void Stretch_render_is_bitwise_deterministic_in_process()
+    {
+        string package = CreateStretchPackage();
+        RenderedProject first = NewService().Render(package);
+        RenderedProject second = NewService().Render(package);
+        Assert.Multiple(() =>
+        {
+            Assert.That(second.Interleaved, Is.EqualTo(first.Interleaved), "拉伸路径位级确定");
+            Assert.That(first.Peak, Is.GreaterThan(0.1), "拉伸后有能量");
+        });
+    }
+
+    [Test]
+    public void Stretch_render_matches_baseline_within_cross_platform_tolerance()
+    {
+        string package = CreateStretchPackage();
+        RenderedProject rendered = NewService().Render(package);
+
+        if (Environment.GetEnvironmentVariable("WEFTONE_GOLDEN_UPDATE") == "1")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(StretchBaselinePath)!);
+            using FileStream stream = File.Create(StretchBaselinePath);
+            WavWriter.WriteHeader(stream, rendered.SampleRate, rendered.Channels, rendered.Interleaved.Length);
+            WavWriter.WriteSamples(stream, rendered.Interleaved);
+            Assert.Warn($"基线已更新: {StretchBaselinePath}（请提交）");
+            return;
+        }
+
+        Assert.That(File.Exists(StretchBaselinePath), Is.True,
+            $"缺少基线 {StretchBaselinePath}；本地设 WEFTONE_GOLDEN_UPDATE=1 生成后提交");
+        float[] baseline = ReadFloatWav(StretchBaselinePath);
+        Assert.That(baseline.Length, Is.EqualTo(rendered.Interleaved.Length), "样本数与基线不一致");
+
+        double peakDifference = 0;
+        for (int i = 0; i < baseline.Length; i++)
+        {
+            double difference = Math.Abs(baseline[i] - rendered.Interleaved[i]);
+            if (difference > peakDifference)
+            {
+                peakDifference = difference;
+            }
+        }
+        TestContext.Out.WriteLine($"拉伸黄金对比: 样本 {baseline.Length}，峰值差 {peakDifference:0.0e0}");
+        // Signalsmith 为频域算法，跨编译器浮点差可达 1e-2 量级（SPEC M4 风险：容差独立于采样/插件基线）
+        Assert.That(peakDifference, Is.LessThanOrEqualTo(2e-2), "拉伸黄金回归超差");
     }
 
     private static float[] ReadFloatWav(string path)

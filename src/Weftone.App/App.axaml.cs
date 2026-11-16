@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Weftone.Adapters.Audio.Miniaudio;
 using Weftone.Adapters.Codecs;
+using Weftone.Adapters.Dsp;
 using Weftone.Adapters.ProjectStore;
 using Weftone.App.Services;
 using Weftone.App.ViewModels;
@@ -23,7 +24,7 @@ public partial class App : Avalonia.Application
             var pluginFactory = new Adapters.Plugins.Clap.ClapInstanceFactory();
             var session = new EditSession(
                 new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer(),
-                pluginFactory);
+                pluginFactory, new Adapters.Dsp.SignalsmithStretcher());
             try
             {
                 session.NewDemo();

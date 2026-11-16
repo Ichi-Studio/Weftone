@@ -21,13 +21,15 @@ public sealed class EditSession : IDisposable
     private readonly IResampler _resampler;
     private readonly IPlanRenderer _offlineRenderer;
     private readonly IPluginInstanceFactory? _pluginFactory;
+    private readonly Weftone.Abstractions.Dsp.ITimeStretcher? _stretcher;
     private readonly string _workspace;
     private readonly Dictionary<string, string> _assetSources = new();
     private List<PreparedAsset> _prepared = [];
     private bool _disposed;
 
     public EditSession(IProjectStore store, ISampleDecoder decoder, IResampler resampler,
-        IPlanRenderer offlineRenderer, IPluginInstanceFactory? pluginFactory = null)
+        IPlanRenderer offlineRenderer, IPluginInstanceFactory? pluginFactory = null,
+        Weftone.Abstractions.Dsp.ITimeStretcher? stretcher = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(decoder);
@@ -38,6 +40,7 @@ public sealed class EditSession : IDisposable
         _resampler = resampler;
         _offlineRenderer = offlineRenderer;
         _pluginFactory = pluginFactory;
+        _stretcher = stretcher;
         _workspace = Path.Combine(Path.GetTempPath(), "weftone-session-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_workspace);
         Document = new ProjectDocument();
@@ -262,7 +265,7 @@ public sealed class EditSession : IDisposable
     private void PrepareAssets()
     {
         _prepared = new AssetPreparer().Prepare(
-            Document, asset => File.OpenRead(_assetSources[asset.Path]), _decoder, _resampler);
+            Document, asset => File.OpenRead(_assetSources[asset.Path]), _decoder, _resampler, _stretcher);
     }
 
     private void ResetWorkspace()

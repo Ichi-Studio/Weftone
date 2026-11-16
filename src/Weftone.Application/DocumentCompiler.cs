@@ -55,7 +55,7 @@ public sealed class DocumentCompiler
             }
             Pattern pattern = document.Patterns.First(p => p.Id == clip.PatternId);
             AddPatternVoices(pattern, clip.StartTick, channelById, assetIndexById,
-                curveIndexByChannel, pluginSlotByChannel, num, den, voices);
+                curveIndexByChannel, pluginSlotByChannel, assets, num, den, voices);
         }
         return BuildPlan(document, assets, voices, totalTicks, loop: false, num, den, curves,
             BuildMasterCurve(document, totalTicks, num, den), pluginSlots, pluginParamEvents);
@@ -78,7 +78,7 @@ public sealed class DocumentCompiler
         RenderPluginParamEvent[] pluginParamEvents =
             BuildPluginParamEvents(document, pluginSlotByChannel, lengthTicks, num, den);
         var voices = new List<RenderVoice>();
-        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, num, den, voices);
+        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, assets, num, den, voices);
         return BuildPlan(document, assets, voices, lengthTicks, loop: true, num, den, curves,
             BuildMasterCurve(document, lengthTicks, num, den), pluginSlots, pluginParamEvents);
     }
@@ -109,9 +109,34 @@ public sealed class DocumentCompiler
         var assetIndexById = new Dictionary<string, int>(assets.Count);
         for (int i = 0; i < assets.Count; i++)
         {
-            assetIndexById[assets[i].AssetId] = i;
+            // 原版（Speed=1）优先为默认映射；变体经 SelectVariantAssetIndex 解析
+            if (assets[i].Speed == 1.0 || !assetIndexById.ContainsKey(assets[i].AssetId))
+            {
+                assetIndexById[assets[i].AssetId] = i;
+            }
         }
         return assetIndexById;
+    }
+
+    /// <summary>M4 D3/D6：通道速度 → 最近档变体索引（无变体回退原版）。</summary>
+    private static int SelectVariantAssetIndex(IReadOnlyList<PreparedAsset> assets,
+        Dictionary<string, int> assetIndexById, string assetId, double stretchSpeed)
+    {
+        double step = AssetPreparer.NearestStretchStep(stretchSpeed);
+        if (Math.Abs(step - 1.0) <= 1e-9)
+        {
+            return assetIndexById[assetId];
+        }
+        int baseIndex = assetIndexById[assetId];
+        string baseAssetId = assets[baseIndex].AssetId;
+        for (int i = 0; i < assets.Count; i++)
+        {
+            if (assets[i].AssetId == baseAssetId && Math.Abs(assets[i].Speed - step) <= 1e-9)
+            {
+                return i;
+            }
+        }
+        return baseIndex;
     }
 
     /// <summary>Plugin 通道 → 每通道一槽（各自独立实例）；引用缺失抛错（工程不完整）。</summary>
@@ -191,7 +216,7 @@ public sealed class DocumentCompiler
     private static void AddPatternVoices(Pattern pattern, long startTickOffset,
         Dictionary<int, Channel> channelById, Dictionary<string, int> assetIndexById,
         Dictionary<int, int> curveIndexByChannel, Dictionary<int, int> pluginSlotByChannel,
-        long num, long den, List<RenderVoice> voices)
+        IReadOnlyList<PreparedAsset> assets, long num, long den, List<RenderVoice> voices)
     {
         foreach (Note note in pattern.Notes)
         {
@@ -206,8 +231,10 @@ public sealed class DocumentCompiler
                 {
                     throw new InvalidOperationException($"sampler channel {channel.Id} 缺少已准备的资产");
                 }
-                // MIDI 60 = 原速；key 偏移即播放速率
-                frequency = Math.Pow(2.0, (note.Key - 60) / 12.0);
+                // MIDI 60 = 原速；key 偏移即播放速率；变体（Speed=s）以 s 倍速还原时长（M4）
+                assetIndex = SelectVariantAssetIndex(assets, assetIndexById, channel.AssetId, channel.StretchSpeed);
+                frequency = Math.Pow(2.0, (note.Key - 60) / 12.0)
+                    * AssetPreparer.NearestStretchStep(channel.StretchSpeed);
             }
             if (channel.Kind == ChannelKind.Plugin)
             {

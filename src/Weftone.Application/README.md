@@ -33,6 +33,9 @@
   中断的临时写不破坏旧快照；策略=编辑后空闲 ≥5s 或距上次快照 ≥50 次命令
   （纯函数可测）；EditSession 记 LastEditedAtUtc/EditsSinceSnapshot，
   SnapshotTo 全量含资产且不清脏标记。
-- `AssetPreparer`：解码 + 重采样 + AssetRef 映射（M1a 竖切 3）。
+- `AssetPreparer`：解码 + 重采样 + AssetRef 映射（M1a 竖切 3）；M4 D3/a：
+  引用通道非 1 档 StretchSpeed 时按档位产出拉伸变体（PreparedAsset.Speed，
+  档位表 {0.5,0.75,1.0,1.25,1.5,2.0} 近邻取整，NearestStretchStep），
+  编译器选变体并以 rate=档位 还原时长（1.0 路径位级不变）。
 - `TickMath`：tick → sample 整数截断映射（PPQ=96）。
 - `PanLaw`：线性声像（D4），升级律走 ADR。

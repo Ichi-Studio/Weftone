@@ -121,8 +121,7 @@ public sealed class ClapScanner : IPluginScanner
                 string tail = error.Trim();
                 if (tail.Length > 0)
                 {
-                    tail = tail.Split('
-')[^1].Trim();
+                    tail = tail.Split('\n')[^1].Trim();
                 }
                 _lastScanError = $"exit={process.ExitCode} {tail}";
                 return null;

@@ -3,6 +3,7 @@
     <Project Path="src/Weftone.Abstractions/Weftone.Abstractions.csproj" />
     <Project Path="src/Weftone.Adapters.Audio.Miniaudio/Weftone.Adapters.Audio.Miniaudio.csproj" />
     <Project Path="src/Weftone.Adapters.Codecs/Weftone.Adapters.Codecs.csproj" />
+    <Project Path="src/Weftone.Adapters.Dsp/Weftone.Adapters.Dsp.csproj" />
     <Project Path="src/Weftone.Adapters.Plugins.Clap/Weftone.Adapters.Plugins.Clap.csproj" />
     <Project Path="src/Weftone.Adapters.ProjectStore/Weftone.Adapters.ProjectStore.csproj" />
     <Project Path="src/Weftone.App/Weftone.App.csproj" />

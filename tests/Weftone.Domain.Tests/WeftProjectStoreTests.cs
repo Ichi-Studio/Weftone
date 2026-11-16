@@ -272,6 +272,23 @@ public class WeftProjectStoreTests
     }
 
     [Test]
+    public void Stretch_speed_roundtrips_and_defaults_to_unity()
+    {
+        var store = new WeftProjectStore();
+        var document = NewDocument();
+        document.Channels[0].StretchSpeed = 1.5;
+        string package = Path.Combine(_workDir, "stretch.weft");
+        store.Save(package, document, new Dictionary<string, string> { ["assets/kick.wav"] = WriteAsset() });
+
+        ProjectDocument loaded = store.Load(package).Document;
+        Assert.Multiple(() =>
+        {
+            Assert.That(loaded.Channels[0].StretchSpeed, Is.EqualTo(1.5));
+            Assert.That(loaded.Channels[1].StretchSpeed, Is.EqualTo(1.0), "缺省 1.0");
+        });
+    }
+
+    [Test]
     public void Load_rejects_unknown_plugin_reference()
     {
         string package = Path.Combine(_workDir, "badplugin.weft");

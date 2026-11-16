@@ -15,7 +15,8 @@ public sealed class ProjectRenderService(
     ISampleDecoder decoder,
     IResampler resampler,
     IPlanRenderer renderer,
-    IPluginInstanceFactory? pluginFactory = null)
+    IPluginInstanceFactory? pluginFactory = null,
+    Weftone.Abstractions.Dsp.ITimeStretcher? stretcher = null)
 {
     private const int BlockFrames = 512;
 
@@ -24,7 +25,7 @@ public sealed class ProjectRenderService(
         ArgumentNullException.ThrowIfNull(projectPath);
         LoadedProject loaded = store.Load(projectPath);
         List<PreparedAsset> assets = new AssetPreparer()
-            .Prepare(loaded.Document, loaded.OpenAsset, decoder, resampler);
+            .Prepare(loaded.Document, loaded.OpenAsset, decoder, resampler, stretcher);
         RenderPlan plan = new DocumentCompiler().Compile(loaded.Document, assets);
 
         IReadOnlyList<IAudioPluginInstance>? table = null;
