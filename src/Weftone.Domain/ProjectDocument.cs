@@ -15,6 +15,8 @@ public sealed class ProjectDocument
     public double MasterVolume { get; set; } = 1.0;
     /// <summary>master volume 自动化点（SPEC M2 D3=a）：master 仅有 volume lane。</summary>
     public List<AutomationPoint> MasterVolumePoints { get; } = [];
+    /// <summary>效果链预设（SPEC M5 D4=a）：名字 → 槽快照（深拷贝存储，应用时再拷入通道）。</summary>
+    public Dictionary<string, List<EffectSlot>> EffectPresets { get; } = [];
     public List<Channel> Channels { get; } = [];
     public List<Pattern> Patterns { get; } = [];
     public List<Clip> Playlist { get; } = [];

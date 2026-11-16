@@ -274,6 +274,112 @@ public partial class MainWindowViewModel : ObservableObject
         AfterEdit();
     }
 
+    /// <summary>添加效果到通道链尾（SPEC M5 竖切 4）。</summary>
+    public void AddEffect(Channel channel, EffectKind kind)
+    {
+        var slot = new EffectSlot { Kind = kind };
+        _session.Execute(new AddEffectSlotCommand(channel.Id, slot));
+        AfterEdit();
+    }
+
+    /// <summary>移除通道效果槽。</summary>
+    public void RemoveEffect(Channel channel, EffectSlot slot)
+    {
+        _session.Execute(new RemoveEffectSlotCommand(channel.Id, slot));
+        AfterEdit();
+    }
+
+    /// <summary>切换效果旁路。</summary>
+    public void SetEffectBypass(Channel channel, EffectSlot slot, bool bypassed)
+    {
+        if (slot.Bypassed == bypassed)
+        {
+            return;
+        }
+        _session.Execute(new SetEffectBypassCommand(channel.Id, slot, slot.Bypassed, bypassed));
+        AfterEdit();
+    }
+
+    private EffectSlot? _effectParamSlot;
+    private Channel? _effectParamChannel;
+    private readonly Dictionary<string, double> _effectParamFrom = [];
+
+    /// <summary>效果参数手势（事务合并撤销）。</summary>
+    public void BeginEffectParamEdit(Channel channel, EffectSlot slot)
+    {
+        _effectParamChannel = channel;
+        _effectParamSlot = slot;
+        _effectParamFrom.Clear();
+        foreach (KeyValuePair<string, double> pair in slot.Parameters)
+        {
+            _effectParamFrom[pair.Key] = pair.Value;
+        }
+        _session.BeginTransaction("调整效果参数");
+    }
+
+    public void DragEffectParam(string parameter, double value)
+    {
+        if (_effectParamSlot is null)
+        {
+            return;
+        }
+        _effectParamSlot.Parameters.TryGetValue(parameter, out double from);
+        _effectParamFrom.TryGetValue(parameter, out double original);
+        _session.Execute(new SetEffectParameterCommand(
+            _effectParamChannel!.Id, _effectParamSlot, parameter, original, value));
+        if (_playback.IsPlaying)
+        {
+            _playback.UpdatePlan(CompileCurrent());
+        }
+    }
+
+    public void EndEffectParamEdit()
+    {
+        _effectParamSlot = null;
+        _effectParamChannel = null;
+        _session.EndTransaction();
+        AfterEdit();
+    }
+
+    /// <summary>保存通道效果链为命名预设（SPEC M5 D4）。</summary>
+    public void SaveEffectPreset(Channel channel, string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        var snapshot = new List<EffectSlot>();
+        foreach (EffectSlot slot in channel.Effects.Slots)
+        {
+            var copy = new EffectSlot { Kind = slot.Kind, Bypassed = slot.Bypassed };
+            foreach (KeyValuePair<string, double> param in slot.Parameters)
+            {
+                copy.Parameters[param.Key] = param.Value;
+            }
+            snapshot.Add(copy);
+        }
+        _session.Document.EffectPresets[name] = snapshot;
+        AfterEdit();
+    }
+
+    /// <summary>应用预设到通道（追加槽——单步撤销的复合命令）。</summary>
+    public void ApplyEffectPreset(Channel channel, string name)
+    {
+        if (!_session.Document.EffectPresets.TryGetValue(name, out List<EffectSlot>? template))
+        {
+            return;
+        }
+        _session.BeginTransaction($"应用效果预设 {name}");
+        foreach (EffectSlot slot in template)
+        {
+            var copy = new EffectSlot { Kind = slot.Kind, Bypassed = slot.Bypassed };
+            foreach (KeyValuePair<string, double> param in slot.Parameters)
+            {
+                copy.Parameters[param.Key] = param.Value;
+            }
+            _session.Execute(new AddEffectSlotCommand(channel.Id, copy));
+        }
+        _session.EndTransaction();
+        AfterEdit();
+    }
+
     /// <summary>插件参数显示值（Mixer 参数面板只读显示，竖切 4）：lane 有曲线按播放头求值。</summary>
     public double GetPluginParamDisplayValue(Channel channel, uint paramId, double fallback)
         => AutomationMath.Evaluate(channel.GetPluginParamPoints(paramId), fallback, PlayheadTick);

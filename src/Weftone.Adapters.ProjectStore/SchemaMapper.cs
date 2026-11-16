@@ -24,6 +24,7 @@ internal sealed class ProjectJson
     [JsonPropertyName("playlist")] public List<ClipJson> Playlist { get; set; } = [];
     [JsonPropertyName("assets")] public List<AssetJson> Assets { get; set; } = [];
     [JsonPropertyName("plugins")] public List<PluginRefJson>? Plugins { get; set; }
+    [JsonPropertyName("effectPresets")] public Dictionary<string, List<EffectJson>>? EffectPresets { get; set; }
 }
 
 internal sealed class ChannelJson
@@ -163,6 +164,16 @@ internal static class SchemaMapper
             Plugins = document.Plugins.Count == 0
                 ? null
                 : document.Plugins.Select(p => new PluginRefJson { Id = p.Id, Path = p.Path }).ToList(),
+            EffectPresets = document.EffectPresets.Count == 0
+                ? null
+                : document.EffectPresets.ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value.Select(e => new EffectJson
+                    {
+                        Kind = e.Kind.ToString(),
+                        Bypassed = e.Bypassed,
+                        Parameters = e.Parameters.Count == 0 ? null : new Dictionary<string, double>(e.Parameters),
+                    }).ToList()),
             Assets = document.Assets.Select(a => new AssetJson
             {
                 Id = a.Id, Path = a.Path, Sha256 = a.Sha256,
@@ -249,6 +260,27 @@ internal static class SchemaMapper
                 $"channel {c.Id} volumePoints", 0, 2));
             document.Channels[^1].PanPoints.AddRange(ParseLane(c.PanPoints,
                 $"channel {c.Id} panPoints", -1, 1));
+        }
+
+        if (json.EffectPresets is not null)
+        {
+            foreach (KeyValuePair<string, List<EffectJson>> preset in json.EffectPresets)
+            {
+                var slots = new List<EffectSlot>();
+                foreach (EffectJson e in preset.Value)
+                {
+                    var slot = new EffectSlot { Kind = ParseEffectKind(e.Kind), Bypassed = e.Bypassed };
+                    if (e.Parameters is not null)
+                    {
+                        foreach (KeyValuePair<string, double> param in e.Parameters)
+                        {
+                            slot.Parameters[param.Key] = param.Value;
+                        }
+                    }
+                    slots.Add(slot);
+                }
+                document.EffectPresets[preset.Key] = slots;
+            }
         }
 
         if (json.Plugins is not null)

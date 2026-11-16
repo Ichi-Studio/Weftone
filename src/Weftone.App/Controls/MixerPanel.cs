@@ -196,6 +196,11 @@ public sealed class MixerPanel : ContentControl
             }
         }
 
+        if (vm is not null)
+        {
+            BuildEffectPanel(vm, channel, paramPanel);
+        }
+
         if (vm is not null && channel.Kind == ChannelKind.Plugin)
         {
             // 插件参数面板（SPEC M3 竖切 3）：描述经 PluginParameterCatalog（临时实例+缓存），
@@ -370,6 +375,163 @@ public sealed class MixerPanel : ContentControl
         };
         return StripShell(isMaster: true, title, volume, label);
     }
+
+    /// <summary>效果面板（SPEC M5 竖切 4）：每槽行（旁路/参数/删）+ 添加 + 预设。</summary>
+    private static void BuildEffectPanel(MainWindowViewModel vm, Channel channel, StackPanel host)
+    {
+        // 添加效果
+        var addKind = new ComboBox { Width = 76, FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center };
+        foreach (EffectKind kind in Enum.GetValues<EffectKind>())
+        {
+            addKind.Items.Add(kind.ToString());
+        }
+        var addButton = new Button
+        {
+            Content = "+ 效果",
+            FontSize = 10,
+            Padding = new Thickness(4, 1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        addButton.Click += (_, _) =>
+        {
+            if (addKind.SelectedIndex is >= 0 and int index)
+            {
+                vm.AddEffect(channel, (EffectKind)index);
+            }
+        };
+        host.Children.Add(addKind);
+        host.Children.Add(addButton);
+
+        // 每槽
+        foreach (EffectSlot slot in channel.Effects.Slots)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            var bypass = new CheckBox
+            {
+                IsChecked = slot.Bypassed,
+                FontSize = 10,
+                Content = slot.Kind.ToString(),
+            };
+            bypass.IsCheckedChanged += (_, _) => vm.SetEffectBypass(channel, slot, bypass.IsChecked == true);
+            var remove = new Button
+            {
+                Content = "×",
+                FontSize = 10,
+                Padding = new Thickness(3, 0),
+                MinWidth = 18,
+            };
+            remove.Click += (_, _) => vm.RemoveEffect(channel, slot);
+            row.Children.Add(bypass);
+            row.Children.Add(remove);
+            host.Children.Add(row);
+
+            // 参数滑条（常见参数定序）
+            (string Name, double Min, double Max)[] descriptors = slot.Kind switch
+            {
+                EffectKind.Eq3Band =>
+                [
+                    ("low", -24, 24), ("mid", -24, 24), ("high", -24, 24),
+                ],
+                EffectKind.Compressor =>
+                [
+                    ("threshold", -60, 0), ("ratio", 1, 20), ("attack", 0, 100), ("release", 10, 1000),
+                ],
+                EffectKind.Delay =>
+                [
+                    ("timeMs", 10, 2000), ("feedback", 0, 0.9), ("mix", 0, 1),
+                ],
+                EffectKind.Reverb =>
+                [
+                    ("decaySeconds", 0.1, 8), ("size", 0, 1), ("preDelayMs", 0, 200),
+                ],
+                _ => [],
+            };
+            foreach ((string name, double min, double max) in descriptors)
+            {
+                double current = slot.Parameters.TryGetValue(name, out double value) ? value : DefaultParameter(slot.Kind, name);
+                var slider = new Slider
+                {
+                    Orientation = Orientation.Horizontal,
+                    Minimum = min, Maximum = max, Value = current,
+                    Width = 76, FontSize = 10,
+                };
+                var label = new TextBlock
+                {
+                    Text = $"{name} {current:0.##}",
+                    FontSize = 9,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x9A, 0xC8, 0xE8)),
+                    TextAlignment = TextAlignment.Center,
+                };
+                bool dragging = false;
+                slider.AddHandler(PointerPressedEvent, (_, _) =>
+                {
+                    dragging = true;
+                    vm.BeginEffectParamEdit(channel, slot);
+                }, RoutingStrategies.Tunnel);
+                slider.AddHandler(PointerReleasedEvent, (_, _) =>
+                {
+                    if (dragging)
+                    {
+                        dragging = false;
+                        vm.EndEffectParamEdit();
+                    }
+                }, RoutingStrategies.Tunnel);
+                slider.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == Slider.ValueProperty && dragging)
+                    {
+                        label.Text = $"{name} {slider.Value:0.##}";
+                        vm.DragEffectParam(name, slider.Value);
+                    }
+                };
+                host.Children.Add(slider);
+                host.Children.Add(label);
+            }
+        }
+
+        // 预设：保存（用名 "default" 简化——竖切 4 UI 最小闭环）+ 应用
+        if (channel.Effects.Slots.Count > 0)
+        {
+            var save = new Button
+            {
+                Content = "存预设",
+                FontSize = 10,
+                Padding = new Thickness(4, 1),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            save.Click += (_, _) => vm.SaveEffectPreset(channel, channel.Name);
+            var apply = new Button
+            {
+                Content = "用预设",
+                FontSize = 10,
+                Padding = new Thickness(4, 1),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            apply.Click += (_, _) => vm.ApplyEffectPreset(channel, channel.Name);
+            var presetRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            presetRow.Children.Add(save);
+            presetRow.Children.Add(apply);
+            host.Children.Add(presetRow);
+        }
+    }
+
+    private static double DefaultParameter(EffectKind kind, string name) => kind switch
+    {
+        EffectKind.Eq3Band => 0,
+        EffectKind.Compressor => name switch
+        {
+            "threshold" => -24, "ratio" => 4, "attack" => 10, _ => 100,
+        },
+        EffectKind.Delay => name switch
+        {
+            "timeMs" => 250, "feedback" => 0.3, _ => 0.3,
+        },
+        EffectKind.Reverb => name switch
+        {
+            "decaySeconds" => 1.5, "size" => 0.5, _ => 20,
+        },
+        _ => 0,
+    };
 
     private sealed class MixDragState
     {
