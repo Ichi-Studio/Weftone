@@ -23,6 +23,7 @@ public sealed class PlanRenderer : IPlanRenderer
     private const int PendingCapacity = 32;
     private const double TwoPi = 6.283185307179586476925286766559;
     private const int PluginChunkFrames = 256;
+    private const int ChannelBufferFrames = 8192;
     private const int MaxActivePluginNotes = 256;
 
     /// <summary>plan 与插件实例表原子束：一次 volatile 引用换入，避免新 plan 配旧表的 slot 错位。</summary>
@@ -30,6 +31,10 @@ public sealed class PlanRenderer : IPlanRenderer
     {
         public RenderPlan? Plan;
         public IAudioPluginInstance[] Plugins = [];
+        /// <summary>每通道效果链（SPEC M5 D2）：无效果链的通道为空数组。</summary>
+        public Effects.IEffectProcessor?[][] ChannelEffects = [];
+        /// <summary>每通道 interleaved 缓冲（效果链挂板，预分配）。</summary>
+        public float[][] ChannelBuffers = [];
         /// <summary>每槽事件 scratch（表构造线程预分配，音频线程只写不扩）。</summary>
         public PluginEvent[][] Scratch = [];
         /// <summary>每槽最近通道增益（note off 后的 release 尾巴沿用；同通道同值）。</summary>
@@ -60,6 +65,7 @@ public sealed class PlanRenderer : IPlanRenderer
     private struct Voice
     {
         public bool Active;
+        public int ChannelIndex;
         public long Wait;
         public long Remaining;
         public double Phase;
@@ -138,6 +144,29 @@ public sealed class PlanRenderer : IPlanRenderer
             state.SlotGainLeft[i] = 1f;
             state.SlotGainRight[i] = 1f;
         }
+        int channels = Math.Max(1, plan.ChannelCount);
+        var chains = new List<Effects.IEffectProcessor?>[channels];
+        for (int c = 0; c < channels; c++)
+        {
+            chains[c] = [];
+        }
+        foreach (Abstractions.Plugins.RenderEffectNode node in plan.EffectNodes)
+        {
+            if (node.Bypassed || node.ChannelIndex < 0 || node.ChannelIndex >= channels)
+            {
+                continue;
+            }
+            chains[node.ChannelIndex].Add(Effects.EffectProcessorFactory.Create(node.Kind, node.Parameters));
+        }
+        state.ChannelEffects = new Effects.IEffectProcessor?[channels][];
+        state.ChannelBuffers = new float[channels][];
+        for (int c = 0; c < channels; c++)
+        {
+            state.ChannelEffects[c] = [.. chains[c]];
+            state.ChannelBuffers[c] = state.ChannelEffects[c].Length > 0
+                ? new float[ChannelBufferFrames * 2]
+                : [];
+        }
         return state;
     }
 
@@ -180,6 +209,10 @@ public sealed class PlanRenderer : IPlanRenderer
                 {
                     segment = tillEnd;
                 }
+            }
+            if (segment > ChannelBufferFrames)
+            {
+                segment = ChannelBufferFrames; // 效果链缓冲上限：超长段拆分
             }
             RenderSegment(state, plan, interleaved, rendered, (int)segment);
             rendered += (int)segment;
@@ -284,6 +317,19 @@ public sealed class PlanRenderer : IPlanRenderer
             _nextEvent++;
         }
 
+        // 效果链通道缓冲清零（SPEC M5 D2：voice 按通道分组，效果后混入总线）
+        bool hasEffects = state.ChannelBuffers.Length > 0;
+        if (hasEffects)
+        {
+            for (int c = 0; c < state.ChannelBuffers.Length; c++)
+            {
+                if (state.ChannelBuffers[c].Length > 0)
+                {
+                    state.ChannelBuffers[c].AsSpan(0, frames * 2).Clear();
+                }
+            }
+        }
+
         for (int v = 0; v < _pool.Length; v++)
         {
             ref Voice voice = ref _pool[v];
@@ -291,13 +337,41 @@ public sealed class PlanRenderer : IPlanRenderer
             {
                 continue;
             }
+            Span<float> target = slice;
+            if (hasEffects && voice.ChannelIndex >= 0
+                && voice.ChannelIndex < state.ChannelBuffers.Length
+                && state.ChannelBuffers[voice.ChannelIndex].Length > 0)
+            {
+                target = state.ChannelBuffers[voice.ChannelIndex].AsSpan(0, frames * 2);
+            }
             if (voice.StealFade > 0)
             {
-                RenderFadeTail(ref voice, segmentStart, slice, frames);
+                RenderFadeTail(ref voice, segmentStart, target, frames);
             }
             else
             {
-                RenderGate(ref voice, segmentStart, slice, frames);
+                RenderGate(ref voice, segmentStart, target, frames);
+            }
+        }
+
+        if (hasEffects)
+        {
+            for (int c = 0; c < state.ChannelBuffers.Length; c++)
+            {
+                float[] buffer = state.ChannelBuffers[c];
+                if (buffer.Length == 0)
+                {
+                    continue;
+                }
+                Span<float> channelSpan = buffer.AsSpan(0, frames * 2);
+                foreach (Effects.IEffectProcessor? effect in state.ChannelEffects[c])
+                {
+                    effect?.Process(channelSpan, frames);
+                }
+                for (int i = 0; i < channelSpan.Length; i++)
+                {
+                    slice[i] += channelSpan[i];
+                }
             }
         }
 
@@ -495,6 +569,7 @@ public sealed class PlanRenderer : IPlanRenderer
             GainRight = voice.GainRight,
             Kind = voice.Kind,
             StealFade = 0,
+            ChannelIndex = voice.ChannelIndex,
             GainCurve = voice.GainCurveIndex >= 0 ? plan.ChannelGainCurves[voice.GainCurveIndex] : null,
             GainCursor = 0,
         };

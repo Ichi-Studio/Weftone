@@ -493,6 +493,83 @@ public class GoldenAudioTests
         Assert.That(peakDifference, Is.LessThanOrEqualTo(1e-4), "切片黄金音频回归超差");
     }
 
+    /// <summary>M5 效果链黄金基线：Lead 通道 EQ（低+6dB/高-3dB）。</summary>
+    private static string EffectBaselinePath
+    {
+        get
+        {
+            var dir = new DirectoryInfo(TestContext.CurrentContext.TestDirectory);
+            while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                dir = dir.Parent!;
+            }
+            string root = dir?.FullName ?? TestContext.CurrentContext.TestDirectory;
+            return Path.Combine(root, "tests", "Weftone.GoldenAudio", "baselines", "m5-effect-golden.wav");
+        }
+    }
+
+    private string CreateEffectPackage()
+    {
+        string kickPath = Path.Combine(_workDir, "kick.wav");
+        DemoProject.WriteKickWav(kickPath);
+        ProjectDocument document = DemoProject.CreateDocument();
+        var eq = new Weftone.Domain.EffectSlot { Kind = Weftone.Domain.EffectKind.Eq3Band };
+        eq.Parameters["low"] = 6;
+        eq.Parameters["high"] = -3;
+        document.Channels[0].Effects.Slots.Add(eq);
+        string package = Path.Combine(_workDir, "m5-effect.weft");
+        new WeftProjectStore().Save(package, document,
+            new Dictionary<string, string> { ["assets/kick.wav"] = kickPath });
+        return package;
+    }
+
+    [Test]
+    public void Effect_render_is_bitwise_deterministic_in_process()
+    {
+        string package = CreateEffectPackage();
+        RenderedProject first = NewService().Render(package);
+        RenderedProject second = NewService().Render(package);
+        Assert.Multiple(() =>
+        {
+            Assert.That(second.Interleaved, Is.EqualTo(first.Interleaved), "效果链位级确定");
+            Assert.That(first.Peak, Is.GreaterThan(0.1), "有声");
+        });
+    }
+
+    [Test]
+    public void Effect_render_matches_baseline_within_cross_platform_tolerance()
+    {
+        string package = CreateEffectPackage();
+        RenderedProject rendered = NewService().Render(package);
+
+        if (Environment.GetEnvironmentVariable("WEFTONE_GOLDEN_UPDATE") == "1")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(EffectBaselinePath)!);
+            using FileStream stream = File.Create(EffectBaselinePath);
+            WavWriter.WriteHeader(stream, rendered.SampleRate, rendered.Channels, rendered.Interleaved.Length);
+            WavWriter.WriteSamples(stream, rendered.Interleaved);
+            Assert.Warn($"基线已更新: {EffectBaselinePath}（请提交）");
+            return;
+        }
+
+        Assert.That(File.Exists(EffectBaselinePath), Is.True,
+            $"缺少基线 {EffectBaselinePath}；本地设 WEFTONE_GOLDEN_UPDATE=1 生成后提交");
+        float[] baseline = ReadFloatWav(EffectBaselinePath);
+        Assert.That(baseline.Length, Is.EqualTo(rendered.Interleaved.Length), "样本数与基线不一致");
+
+        double peakDifference = 0;
+        for (int i = 0; i < baseline.Length; i++)
+        {
+            double difference = Math.Abs(baseline[i] - rendered.Interleaved[i]);
+            if (difference > peakDifference)
+            {
+                peakDifference = difference;
+            }
+        }
+        TestContext.Out.WriteLine($"效果黄金对比: 样本 {baseline.Length}，峰值差 {peakDifference:0.0e0}");
+        Assert.That(peakDifference, Is.LessThanOrEqualTo(1e-4), "效果链黄金回归超差");
+    }
+
     private static float[] ReadFloatWav(string path)
     {
         byte[] all = File.ReadAllBytes(path);

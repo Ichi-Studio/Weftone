@@ -29,6 +29,8 @@ public struct RenderVoice
     public float Velocity;
     /// <summary>资产内起始帧（SPEC M4 竖切 2：切片起播偏移）；Kind==Sampler 时生效，0 = 从头播。</summary>
     public long AssetOffsetFrames;
+    /// <summary>所属通道索引（SPEC M5 D2：效果链按通道分组）；-1 = 无效果链（直混总线）。</summary>
+    public int ChannelIndex = -1;
 
     public RenderVoice()
     {
@@ -89,4 +91,8 @@ public sealed class RenderPlan
     public PlanPluginSlot[] PluginSlots { get; init; } = [];
     /// <summary>插件参数事件点（SPEC M3 竖切 4）：按 Sample 升序；空 = 无参数自动化。</summary>
     public RenderPluginParamEvent[] PluginParamEvents { get; init; } = [];
+    /// <summary>内置效果器节点（SPEC M5）：按通道内串联顺序；空 = 无效果链。</summary>
+    public Plugins.RenderEffectNode[] EffectNodes { get; init; } = [];
+    /// <summary>通道数（渲染按通道分组，SPEC M5 D2=a）。</summary>
+    public int ChannelCount { get; init; }
 }

@@ -46,6 +46,9 @@ public sealed class DocumentCompiler
         Dictionary<int, int> pluginSlotByChannel = BuildPluginSlots(document, out PlanPluginSlot[] pluginSlots);
         RenderPluginParamEvent[] pluginParamEvents =
             BuildPluginParamEvents(document, pluginSlotByChannel, totalTicks, num, den);
+        var channelIndexById = new Dictionary<int, int>();
+        Abstractions.Plugins.RenderEffectNode[] effectNodes =
+            BuildEffectNodes(document, channelIndexById);
         var voices = new List<RenderVoice>();
         foreach (Clip clip in document.Playlist.OrderBy(c => c.StartTick))
         {
@@ -55,10 +58,12 @@ public sealed class DocumentCompiler
             }
             Pattern pattern = document.Patterns.First(p => p.Id == clip.PatternId);
             AddPatternVoices(pattern, clip.StartTick, channelById, assetIndexById,
-                curveIndexByChannel, pluginSlotByChannel, assets, document, num, den, voices);
+                curveIndexByChannel, pluginSlotByChannel, assets, document,
+                channelIndexById, num, den, voices);
         }
         return BuildPlan(document, assets, voices, totalTicks, loop: false, num, den, curves,
-            BuildMasterCurve(document, totalTicks, num, den), pluginSlots, pluginParamEvents);
+            BuildMasterCurve(document, totalTicks, num, den), pluginSlots, pluginParamEvents,
+            effectNodes, document.Channels.Count);
     }
 
     /// <summary>Pattern 模式：单个 Pattern 从 0 展开为声部，循环区间 = [0, 长度)，长度按小节向上取整（至少 1 小节）。</summary>
@@ -77,10 +82,14 @@ public sealed class DocumentCompiler
         Dictionary<int, int> pluginSlotByChannel = BuildPluginSlots(document, out PlanPluginSlot[] pluginSlots);
         RenderPluginParamEvent[] pluginParamEvents =
             BuildPluginParamEvents(document, pluginSlotByChannel, lengthTicks, num, den);
+        var channelIndexById = new Dictionary<int, int>();
+        Abstractions.Plugins.RenderEffectNode[] effectNodes =
+            BuildEffectNodes(document, channelIndexById);
         var voices = new List<RenderVoice>();
-        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, assets, document, num, den, voices);
+        AddPatternVoices(pattern, 0, channelById, assetIndexById, curveIndexByChannel, pluginSlotByChannel, assets, document, channelIndexById, num, den, voices);
         return BuildPlan(document, assets, voices, lengthTicks, loop: true, num, den, curves,
-            BuildMasterCurve(document, lengthTicks, num, den), pluginSlots, pluginParamEvents);
+            BuildMasterCurve(document, lengthTicks, num, den), pluginSlots, pluginParamEvents,
+            effectNodes, document.Channels.Count);
     }
 
     /// <summary>Pattern 循环长度：最大音符结束 tick 向上取整到小节，至少 1 小节（4 拍）。</summary>
@@ -137,6 +146,48 @@ public sealed class DocumentCompiler
             }
         }
         return baseIndex;
+    }
+
+    /// <summary>通道效果链 → plan 效果节点（SPEC M5 D2）：仅含带效果链的通道；
+    /// channelIndexById 记录通道 id → 通道索引（voice.ChannelIndex 用）。</summary>
+    private static Abstractions.Plugins.RenderEffectNode[] BuildEffectNodes(
+        ProjectDocument document, Dictionary<int, int> channelIndexById)
+    {
+        var nodes = new List<Abstractions.Plugins.RenderEffectNode>();
+        int index = 0;
+        foreach (Channel channel in document.Channels)
+        {
+            if (channel.Effects.Slots.Count == 0)
+            {
+                continue;
+            }
+            channelIndexById[channel.Id] = index++;
+            foreach (EffectSlot slot in channel.Effects.Slots)
+            {
+                nodes.Add(new Abstractions.Plugins.RenderEffectNode
+                {
+                    ChannelIndex = channelIndexById[channel.Id],
+                    Kind = slot.Kind.ToString(),
+                    Parameters = CompileEffectParameters(slot),
+                    Bypassed = slot.Bypassed,
+                });
+            }
+        }
+        return [.. nodes];
+    }
+
+    /// <summary>效果槽参数 → plan 定序数组（Eq3Band: [low, mid, high] dB，缺省 0）。</summary>
+    private static double[] CompileEffectParameters(EffectSlot slot)
+    {
+        double Get(string key) => slot.Parameters.TryGetValue(key, out double value) ? value : 0;
+        return slot.Kind switch
+        {
+            EffectKind.Eq3Band => [Get("low"), Get("mid"), Get("high")],
+            EffectKind.Compressor => [Get("threshold"), Get("ratio"), Get("attack"), Get("release")],
+            EffectKind.Delay => [Get("timeMs"), Get("feedback"), Get("mix")],
+            EffectKind.Reverb => [Get("decaySeconds"), Get("size"), Get("preDelayMs")],
+            _ => [],
+        };
     }
 
     /// <summary>资产切片点（SPEC M4 D4）；资产缺失返回空表。</summary>
@@ -227,7 +278,8 @@ public sealed class DocumentCompiler
     private static void AddPatternVoices(Pattern pattern, long startTickOffset,
         Dictionary<int, Channel> channelById, Dictionary<string, int> assetIndexById,
         Dictionary<int, int> curveIndexByChannel, Dictionary<int, int> pluginSlotByChannel,
-        IReadOnlyList<PreparedAsset> assets, ProjectDocument document, long num, long den, List<RenderVoice> voices)
+        IReadOnlyList<PreparedAsset> assets, ProjectDocument document,
+        Dictionary<int, int> channelIndexById, long num, long den, List<RenderVoice> voices)
     {
         foreach (Note note in pattern.Notes)
         {
@@ -273,6 +325,7 @@ public sealed class DocumentCompiler
                     PluginSlot = pluginSlotByChannel[channel.Id],
                     NoteKey = note.Key,
                     Velocity = (float)note.Velocity,
+                    ChannelIndex = channelIndexById.TryGetValue(channel.Id, out int pluginFxIndex) ? pluginFxIndex : -1,
                 });
                 continue;
             }
@@ -289,6 +342,7 @@ public sealed class DocumentCompiler
                 AssetIndex = assetIndex,
                 GainCurveIndex = curveIndex,
                 AssetOffsetFrames = assetOffsetFrames,
+                ChannelIndex = channelIndexById.TryGetValue(channel.Id, out int fxIndex) ? fxIndex : -1,
             });
         }
     }
@@ -391,7 +445,8 @@ public sealed class DocumentCompiler
     private static RenderPlan BuildPlan(ProjectDocument document, IReadOnlyList<PreparedAsset> assets,
         List<RenderVoice> voices, long totalTicks, bool loop, long num, long den,
         GainBreakpoint[][] channelGainCurves, GainBreakpoint[]? masterGainCurve,
-        PlanPluginSlot[] pluginSlots, RenderPluginParamEvent[] pluginParamEvents)
+        PlanPluginSlot[] pluginSlots, RenderPluginParamEvent[] pluginParamEvents,
+        Abstractions.Plugins.RenderEffectNode[] effectNodes, int channelCount)
     {
         RenderVoice[] sorted = voices.OrderBy(v => v.StartSample).ToArray();
         var planAssets = new PlanAsset[assets.Count];
@@ -419,6 +474,8 @@ public sealed class DocumentCompiler
             MasterGainCurve = masterGainCurve,
             PluginSlots = pluginSlots,
             PluginParamEvents = pluginParamEvents,
+            EffectNodes = effectNodes,
+            ChannelCount = channelCount,
         };
     }
 }
