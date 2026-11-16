@@ -95,7 +95,7 @@ static const void* host_get_extension(const clap_host_t* host, const char* exten
 
 static void host_request_restart(const clap_host_t* host) { (void)host; }
 static void host_request_process(const clap_host_t* host) { (void)host; }
-static bool host_request_callback(const clap_host_t* host) { (void)host; return false; }
+static void host_request_callback(const clap_host_t* host) { (void)host; }
 
 // ---- 事件流 ----
 static uint32_t in_events_size(const clap_input_events_t* list)

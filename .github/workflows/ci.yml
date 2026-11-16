@@ -32,10 +32,26 @@ jobs:
         run: dotnet build -c Debug
 
       - name: 测试 Release
-        run: dotnet test -c Release --no-build
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test -c Release --no-build 2>&1 | tee test-release.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            grep -E "^  (失败|Failed) " test-release.log | while read -r line; do echo "::error::$line"; done
+            exit $status
+          fi
 
       - name: 测试 Debug（分配断言生效）
-        run: dotnet test -c Debug --no-build
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test -c Debug --no-build 2>&1 | tee test-debug.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            grep -E "^  (失败|Failed) " test-debug.log | while read -r line; do echo "::error::$line"; done
+            exit $status
+          fi
 
       - name: CLI 冒烟（headless 渲染 1s WAV）
         run: >-
