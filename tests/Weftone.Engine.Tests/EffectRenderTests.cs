@@ -108,4 +108,53 @@ public class EffectRenderTests
         renderer.Render(buffer);
         Assert.That(buffer, Is.All.EqualTo(0f));
     }
+
+    [Test]
+    public void Compressor_attenuates_loud_and_is_deterministic()
+    {
+        var loud = new float[2 * 512];
+        for (int i = 0; i < 512; i++)
+        {
+            loud[2 * i] = loud[2 * i + 1] = 0.9f;
+        }
+        var first = (float[])loud.Clone();
+        new CompressorProcessor(-20, 4, 1, 50).Process(first, 512);
+        var second = (float[])loud.Clone();
+        new CompressorProcessor(-20, 4, 1, 50).Process(second, 512);
+        Assert.That(second, Is.EqualTo(first), "位级确定");
+        Assert.That(Math.Abs(first[^1]), Is.LessThan(0.5f), "0.9 输入经压缩显著衰减");
+        Assert.That(Math.Abs(first[^1]), Is.GreaterThan(0.1f), "不静音");
+    }
+
+    [Test]
+    public void Delay_produces_echoes()
+    {
+        var impulse = new float[2 * 14_400];
+        impulse[0] = impulse[1] = 1f;
+        new DelayProcessor(100, 0.5, 1.0).Process(impulse, 14_400);
+        // 100ms = 4800 样本处首回声（0.5 反馈 × 0.7071 ≈ 0.35）；9600 处第二回声
+        Assert.That(Math.Abs(impulse[2 * 4800]), Is.GreaterThan(0.1f), "首回声位置");
+        Assert.That(Math.Abs(impulse[2 * 9600]), Is.GreaterThan(0.01f), "反馈第二回声");
+    }
+
+    [Test]
+    public void Reverb_spreads_energy_and_decays()
+    {
+        var impulse = new float[2 * 48_000];
+        impulse[0] = impulse[1] = 1f;
+        var wet = (float[])impulse.Clone();
+        new ReverbProcessor(0.5, 0.5, 10).Process(wet, 48_000);
+        double early = 0, late = 0;
+        for (int i = 0; i < 24_000; i++) early += Math.Abs(wet[2 * i]);
+        for (int i = 24_000; i < 48_000; i++) late += Math.Abs(wet[2 * i]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(early, Is.GreaterThan(1.0), "前半窗有能量");
+            Assert.That(late, Is.GreaterThan(0.0), "尾部延续");
+            Assert.That(late, Is.LessThan(early), "衰减");
+        });
+        var again = (float[])impulse.Clone();
+        new ReverbProcessor(0.5, 0.5, 10).Process(again, 48_000);
+        Assert.That(again, Is.EqualTo(wet), "位级确定");
+    }
 }

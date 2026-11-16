@@ -125,13 +125,26 @@ public static class EffectProcessorFactory
     /// <summary>未知类型返回 null（节点跳过——前向兼容）。</summary>
     public static IEffectProcessor? Create(string kind, double[] parameters)
     {
-        if (kind == "Eq3Band")
+        return kind switch
         {
-            double low = parameters.Length > 0 ? parameters[0] : 0;
-            double mid = parameters.Length > 1 ? parameters[1] : 0;
-            double high = parameters.Length > 2 ? parameters[2] : 0;
-            return new Eq3BandProcessor(low, mid, high);
-        }
-        return null;
+            "Eq3Band" => new Eq3BandProcessor(
+                parameters.Length > 0 ? parameters[0] : 0,
+                parameters.Length > 1 ? parameters[1] : 0,
+                parameters.Length > 2 ? parameters[2] : 0),
+            "Compressor" => new CompressorProcessor(
+                parameters.Length > 0 ? parameters[0] : -24,
+                parameters.Length > 1 ? parameters[1] : 4,
+                parameters.Length > 2 ? parameters[2] : 10,
+                parameters.Length > 3 ? parameters[3] : 100),
+            "Delay" => new DelayProcessor(
+                parameters.Length > 0 ? parameters[0] : 250,
+                parameters.Length > 1 ? parameters[1] : 0.3,
+                parameters.Length > 2 ? parameters[2] : 0.3),
+            "Reverb" => new ReverbProcessor(
+                parameters.Length > 0 ? parameters[0] : 1.5,
+                parameters.Length > 1 ? parameters[1] : 0.5,
+                parameters.Length > 2 ? parameters[2] : 20),
+            _ => null,
+        };
     }
 }
