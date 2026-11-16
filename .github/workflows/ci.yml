@@ -34,9 +34,10 @@ jobs:
       - name: 测试 Release
         shell: bash
         run: |
-          set -o pipefail
+          set +e
           dotnet test -c Release --no-build --logger "console;verbosity=detailed" 2>&1 | tee test-release.log
-          status=$?
+          status=${PIPESTATUS[0]}
+          set -e
           if [ $status -ne 0 ]; then
             grep -E "失败|Failed" test-release.log | grep -v "已通过\|Passed" | head -40 | while read -r line; do echo "::error::$line"; done
             exit $status
@@ -45,9 +46,10 @@ jobs:
       - name: 测试 Debug（分配断言生效）
         shell: bash
         run: |
-          set -o pipefail
+          set +e
           dotnet test -c Debug --no-build --logger "console;verbosity=detailed" 2>&1 | tee test-debug.log
-          status=$?
+          status=${PIPESTATUS[0]}
+          set -e
           if [ $status -ne 0 ]; then
             grep -E "失败|Failed" test-debug.log | grep -v "已通过\|Passed" | head -40 | while read -r line; do echo "::error::$line"; done
             exit $status
