@@ -3,6 +3,7 @@
     <Project Path="src/Weftone.Abstractions/Weftone.Abstractions.csproj" />
     <Project Path="src/Weftone.Adapters.Audio.Miniaudio/Weftone.Adapters.Audio.Miniaudio.csproj" />
     <Project Path="src/Weftone.Adapters.Codecs/Weftone.Adapters.Codecs.csproj" />
+    <Project Path="src/Weftone.Adapters.Plugins.Clap/Weftone.Adapters.Plugins.Clap.csproj" />
     <Project Path="src/Weftone.Adapters.ProjectStore/Weftone.Adapters.ProjectStore.csproj" />
     <Project Path="src/Weftone.App/Weftone.App.csproj" />
     <Project Path="src/Weftone.Application/Weftone.Application.csproj" />
@@ -13,11 +14,13 @@
     <Project Path="tests/Weftone.App.Tests/Weftone.App.Tests.csproj" />
     <Project Path="tests/Weftone.Application.Tests/Weftone.Application.Tests.csproj" />
     <Project Path="tests/Weftone.ArchTests/Weftone.ArchTests.csproj" />
+    <Project Path="tests/Weftone.Adapters.Plugins.Clap.Tests/Weftone.Adapters.Plugins.Clap.Tests.csproj" />
     <Project Path="tests/Weftone.Domain.Tests/Weftone.Domain.Tests.csproj" />
     <Project Path="tests/Weftone.Engine.Tests/Weftone.Engine.Tests.csproj" />
     <Project Path="tests/Weftone.GoldenAudio/Weftone.GoldenAudio.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/HeadlessRender/HeadlessRender.csproj" />
+    <Project Path="tools/Weftone.PluginScan/Weftone.PluginScan.csproj" />
   </Folder>
 </Solution>

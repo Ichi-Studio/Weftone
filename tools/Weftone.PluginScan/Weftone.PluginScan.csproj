@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>weftone-plugin-scan</AssemblyName>
+    <RootNamespace>Weftone.Tools.PluginScan</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Weftone.Adapters.Plugins.Clap\Weftone.Adapters.Plugins.Clap.csproj" />
+  </ItemGroup>
+
+</Project>
