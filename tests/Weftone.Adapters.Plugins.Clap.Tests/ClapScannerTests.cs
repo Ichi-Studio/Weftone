@@ -55,13 +55,17 @@ public class ClapScannerTests
 
     private ClapScanner NewScanner(string? cliPath = null) => new(cliPath ?? _cliPath, _cachePath);
 
+    private string Diagnostics(ClapScanner scanner)
+        => scanner.RecentFailures.Count == 0 ? "" : string.Join(" | ", scanner.RecentFailures.Take(3));
+
     [Test]
     public async Task Scans_test_sine_descriptor_via_isolated_process()
     {
         File.Copy(_sineClap!, Path.Combine(_scanDir, "sine.clap"));
-        PluginScanResult result = await NewScanner().ScanAsync([_scanDir]);
+        ClapScanner scanner = NewScanner();
+        PluginScanResult result = await scanner.ScanAsync([_scanDir]);
 
-        Assert.That(result.FailedFiles, Is.Empty);
+        Assert.That(result.FailedFiles, Is.Empty, $"扫描失败: {Diagnostics(scanner)}");
         ScannedPlugin plugin = result.Plugins.Single();
         Assert.Multiple(() =>
         {
@@ -82,11 +86,12 @@ public class ClapScannerTests
         File.Copy(_crashClap!, Path.Combine(_scanDir, "b_crash.clap"));
         await File.WriteAllTextAsync(Path.Combine(_scanDir, "c_not_a_clap.clap"), "garbage");
 
-        PluginScanResult result = await NewScanner().ScanAsync([_scanDir]);
+        ClapScanner scanner = NewScanner();
+        PluginScanResult result = await scanner.ScanAsync([_scanDir]);
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Plugins, Has.Count.EqualTo(1), "崩溃与坏文件之外的插件照常收得");
+            Assert.That(result.Plugins, Has.Count.EqualTo(1), $"崩溃与坏文件之外的插件照常收得: {Diagnostics(scanner)}");
             Assert.That(result.Plugins[0].Descriptor.Id, Is.EqualTo("io.github.ichi-studio.weftone.test-sine"));
             Assert.That(result.FailedFiles.Select(Path.GetFileName),
                 Is.EqualTo(new[] { "b_crash.clap", "c_not_a_clap.clap" }), "崩溃与坏文件进失败清单");

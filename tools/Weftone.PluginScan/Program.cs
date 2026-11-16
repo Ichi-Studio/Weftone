@@ -33,6 +33,8 @@ public static class Program
         }
         if (!ClapBridgeNative.TryScan(args[0], out PluginDescriptor[] descriptors))
         {
+            Console.Error.WriteLine($"scan failed: {args[0]}");
+            Console.Error.WriteLine($"probe dir: {AppContext.BaseDirectory}");
             return 2;
         }
         foreach (PluginDescriptor descriptor in descriptors)

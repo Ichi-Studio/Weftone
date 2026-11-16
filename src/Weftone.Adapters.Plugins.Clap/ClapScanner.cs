@@ -22,6 +22,10 @@ public sealed class ClapScanner : IPluginScanner
 
     private readonly string _scannerExecutable;
     private readonly string _cachePath;
+    private readonly List<string> _recentFailures = [];
+
+    /// <summary>最近一次 ScanAsync 的子进程失败诊断（stderr 尾行；测试/排查用）。</summary>
+    public IReadOnlyList<string> RecentFailures => _recentFailures;
 
     public ClapScanner(string? scannerExecutablePath = null, string? cachePath = null)
     {
@@ -43,6 +47,7 @@ public sealed class ClapScanner : IPluginScanner
         Dictionary<string, CacheEntry> cache = LoadCache();
         var plugins = new List<ScannedPlugin>();
         var failed = new List<string>();
+        _recentFailures.Clear();
 
         foreach (string directory in directories)
         {
@@ -62,6 +67,7 @@ public sealed class ClapScanner : IPluginScanner
                 CacheEntry? entry = await ScanFileAsync(full, timeout, cancellationToken);
                 if (entry is null)
                 {
+                    _recentFailures.Add($"{full}: {_lastScanError ?? "未知"}");
                     failed.Add(full);
                     continue; // 失败不入缓存：下次扫描自动重试（重建后 mtime 已变）
                 }
@@ -76,6 +82,8 @@ public sealed class ClapScanner : IPluginScanner
         SaveCache(cache);
         return new PluginScanResult(plugins, failed);
     }
+
+    private string? _lastScanError;
 
     private async Task<CacheEntry?> ScanFileAsync(string file, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -97,6 +105,7 @@ public sealed class ClapScanner : IPluginScanner
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
+            _lastScanError = $"启动失败: {ex.Message}";
             return null;
         }
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -104,9 +113,18 @@ public sealed class ClapScanner : IPluginScanner
         try
         {
             string output = await process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+            string error = await process.StandardError.ReadToEndAsync(timeoutCts.Token);
             await process.WaitForExitAsync(timeoutCts.Token);
             if (process.ExitCode != 0)
             {
+                // 诊断优先 stderr 尾行（CLI/崩溃信息），否则退出码
+                string tail = error.Trim();
+                if (tail.Length > 0)
+                {
+                    tail = tail.Split('
+')[^1].Trim();
+                }
+                _lastScanError = $"exit={process.ExitCode} {tail}";
                 return null;
             }
             return new CacheEntry { Plugins = ParseOutput(output) };
@@ -121,10 +139,12 @@ public sealed class ClapScanner : IPluginScanner
             catch (InvalidOperationException)
             {
             }
+            _lastScanError = "超时";
             return null;
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            _lastScanError = $"JSON: {ex.Message}";
             return null;
         }
     }
