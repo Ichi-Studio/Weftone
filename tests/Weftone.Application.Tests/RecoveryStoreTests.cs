@@ -72,6 +72,7 @@ public class RecoveryStoreTests
         AddSineContent(session, volume: 0.75);
         AutomationLanes.Insert(session.Document.Channels[0].VolumePoints,
             new AutomationPoint { Tick = 96, Value = 1.25 });
+        session.Execute(new SetTempoCommand(120));
         var store = new RecoveryStore(_recoveryDir);
 
         RecoverySnapshot snapshot = store.Save(session);

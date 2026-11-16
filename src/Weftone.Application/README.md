@@ -18,6 +18,11 @@
   `ImportSample`（解码校验 → 工作区 → ImportSampleCommand 一步注册资产+通道）；
   `ExportWav`（Song 全时间轴离线渲染，float32 WAV，独立离线渲染器实例）。
 - `ProjectRenderService` / `WavWriter`：离线导出（M1a 竖切 4，CLI 接入）。
+- `RecoveryStore` / `AutosavePolicy`（M2 D4=a）：恢复区（%LocalAppData%\Weftone\recovery）
+  每工程一槽（key=路径 SHA256，未保存=untitled）；原子写 *.tmp → File.Replace，
+  中断的临时写不破坏旧快照；策略=编辑后空闲 ≥5s 或距上次快照 ≥50 次命令
+  （纯函数可测）；EditSession 记 LastEditedAtUtc/EditsSinceSnapshot，
+  SnapshotTo 全量含资产且不清脏标记。
 - `AssetPreparer`：解码 + 重采样 + AssetRef 映射（M1a 竖切 3）。
 - `TickMath`：tick → sample 整数截断映射（PPQ=96）。
 - `PanLaw`：线性声像（D4），升级律走 ADR。
