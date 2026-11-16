@@ -90,7 +90,8 @@ ProjectDocument（可编辑 / 可撤销 / 富对象）
 | **M1b**（已完成） | 最小 UI：Piano Roll / Playlist / Mixer / 传输条 / 工程存取 |
 | **M2**（已完成） | 自动化曲线（通道 vol/pan + master）、Autosave/Crash Recovery、RCU plan 交换 |
 | **M3**（已完成） | CLAP 宿主：扫描隔离进程、插件出声（实例表 RCU）、参数与 state 持久化、参数自动化 |
-| M4+ | 拉伸 / 切片、内置插件扩展、进程隔离、性能打磨 |
+| **M4**（已完成） | 时间拉伸（Signalsmith 变体预渲染）、切片演奏（SlicePoints + key 映射）、切片/拉伸 UI |
+| M5+ | 内置插件扩展、进程隔离、性能打磨、插件 UI 嵌入（高危另立专项） |
 
 ## 构建
 
