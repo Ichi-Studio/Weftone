@@ -7,7 +7,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10%20LTS-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
-[![Status](https://img.shields.io/badge/status-M1b%20pre--alpha-orange.svg)](#路线图)
+[![Status](https://img.shields.io/badge/status-M2%20pre--alpha-orange.svg)](#路线图)
 
 ## 这是什么
 
@@ -19,15 +19,18 @@ Pattern → Playlist → Mixer 范式，但**代码、UI、DSP、工程格式全
 - 不复制任何专有资产，不复刻 FL Studio 内部架构；
 - 不使用 FL / Fruity / Image-Line 的命名或视觉资产。
 
-## 当前状态：M1b（最小 UI 阶段）
+## 当前状态：M2（自动化 + Autosave + RCU 阶段）
 
-M0（地基）与 M1a（headless 竖切）已完成：`.weft` 工程可确定性渲染出 WAV，
-含文档模型、命令撤销、编译器、transport、Sampler 声部、Mixer 与黄金音频回归。
-当前推进 M1b 最小 UI（[specs/M1b_UI.md](specs/M1b_UI.md)）：
+M0（地基）、M1a（headless 竖切）与 M1b（最小 UI）已完成：加载采样 → 画音符 →
+Pattern 循环 / Song 排段 → 混音 → 导出 WAV 全链可用。M2
+（[specs/M2_AUTOMATION.md](specs/M2_AUTOMATION.md)）四竖切已完成：
 
-- **竖切 1（已完成）**：Avalonia App 骨架、传输条（播放/停止/位置/BPM/撤销重做）、
-  工程存取（演示工程/打开/保存）、实时播放接线（miniaudio + 停止-交换-恢复）。
-- 竖切 2~4（进行中）：Piano Roll 自绘、Playlist 自绘、Mixer、采样导入与导出。
+- **自动化曲线（headless + UI）**：通道/master volume/pan 关键点曲线，
+  编译为增益断点、渲染块内逐样本斜坡（零分配），lane 自绘与画/拖/删手势，
+  黄金音频基线 `m2-automation-golden.wav`；
+- **Autosave / Crash Recovery**：空闲 ≥5s 或 ≥50 次编辑触发恢复区原子快照，
+  崩溃后启动提示恢复/丢弃；
+- **RCU plan 交换**：播放中编辑不停后端、位置连续无静音缺口（并发 fuzz 守护）。
 
 仓库另含：项目章程（[AGENTS.md](AGENTS.md)）、八项已定稿的
 [架构决策记录](docs/adr/)、[贡献指南](CONTRIBUTING.md)、
@@ -84,8 +87,9 @@ ProjectDocument（可编辑 / 可撤销 / 富对象）
 |---|---|
 | **M0**（已完成） | 仓库 / CI / 架构测试 / miniaudio shim / 正弦出声 / RT 断言 / 渲染 CLI |
 | **M1a**（已完成） | headless 竖切：文档模型、`.weft` 存取、命令撤销、编译器、transport、Sampler、Mixer、导出 |
-| **M1b**（进行中） | 最小 UI：Piano Roll / Playlist / Mixer / 传输条 / 工程存取 |
-| M2+ | 自动化曲线、CLAP 宿主、拉伸 / 切片、进程隔离、性能打磨 |
+| **M1b**（已完成） | 最小 UI：Piano Roll / Playlist / Mixer / 传输条 / 工程存取 |
+| **M2**（已完成） | 自动化曲线（通道 vol/pan + master）、Autosave/Crash Recovery、RCU plan 交换 |
+| M3+ | CLAP 宿主、拉伸 / 切片、进程隔离、性能打磨 |
 
 ## 构建
 
