@@ -90,6 +90,39 @@ public sealed class EditSession : IDisposable
     }
 
     /// <summary>打开工程包。projectPathOverride 用于恢复区还原：从快照装载但记原工程路径并保持脏标记。</summary>
+    /// <summary>资产波形峰值（SPEC M4 竖切 3 切片编辑面板）：每 peakStride 帧取最大绝对值。</summary>
+    public float[] GetAssetPeaks(string assetId, int peakStride = 256)
+    {
+        PreparedAsset? asset = _prepared.FirstOrDefault(a => a.AssetId == assetId);
+        if (asset is null || asset.Interleaved.Length == 0)
+        {
+            return [];
+        }
+        int channels = Math.Max(1, asset.Channels);
+        long frames = asset.Frames;
+        int count = (int)Math.Max(1, (frames + peakStride - 1) / peakStride);
+        var peaks = new float[count];
+        for (int p = 0; p < count; p++)
+        {
+            long start = (long)p * peakStride;
+            long end = Math.Min(frames, start + peakStride);
+            float peak = 0;
+            for (long f = start; f < end; f++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    float magnitude = Math.Abs(asset.Interleaved[(int)(f * channels + c)]);
+                    if (magnitude > peak)
+                    {
+                        peak = magnitude;
+                    }
+                }
+            }
+            peaks[p] = peak;
+        }
+        return peaks;
+    }
+
     /// <summary>插件 state chunk（SPEC M3 竖切 3）：Open 时从包读入；Save 前由宿主抓取更新（写 presets/）。</summary>
     public IReadOnlyDictionary<int, byte[]> PluginStates { get; set; } = new Dictionary<int, byte[]>();
 

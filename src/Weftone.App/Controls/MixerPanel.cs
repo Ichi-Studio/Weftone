@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Weftone.Abstractions.Plugins;
 using Weftone.App.ViewModels;
+using Weftone.Application;
 using Weftone.Domain;
 
 namespace Weftone.App.Controls;
@@ -149,6 +150,34 @@ public sealed class MixerPanel : ContentControl
             IsEnabled = !autoPan,
         };
         var paramPanel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 2 };
+        if (vm is not null && channel.Kind == ChannelKind.Sampler)
+        {
+            // 采样通道属性（SPEC M4）：拉伸档位 + 切片演奏开关
+            var speedCombo = new ComboBox
+            {
+                Width = 76,
+                ItemsSource = vm.StretchSpeedSteps,
+                SelectedItem = AssetPreparer.NearestStretchStep(channel.StretchSpeed),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            speedCombo.SelectionChanged += (_, _) =>
+            {
+                if (speedCombo.SelectedItem is double speed)
+                {
+                    vm.SetChannelStretchSpeed(channel, speed);
+                }
+            };
+            var sliceToggle = new CheckBox
+            {
+                Content = "切片",
+                IsChecked = channel.SliceMode,
+                FontSize = 10,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            sliceToggle.IsCheckedChanged += (_, _) => vm.SetChannelSliceMode(channel, sliceToggle.IsChecked == true);
+            paramPanel.Children.Add(speedCombo);
+            paramPanel.Children.Add(sliceToggle);
+        }
 
         if (vm is not null)
         {

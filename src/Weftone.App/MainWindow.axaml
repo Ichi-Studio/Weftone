@@ -59,6 +59,24 @@
       </StackPanel>
     </Border>
 
+    <Border DockPanel.Dock="Bottom" Height="120" Background="#1E1E24">
+      <Grid RowDefinitions="26,*">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="8,2">
+          <TextBlock Text="切片编辑" VerticalAlignment="Center" Foreground="#A8A8B0" />
+          <ComboBox x:Name="SliceChannelCombo" ItemsSource="{Binding SamplerChannels}"
+                    SelectedItem="{Binding SelectedSliceChannel, Mode=TwoWay}" Width="140">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="domain:Channel">
+                <TextBlock Text="{Binding Name}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+        <controls:WaveformSliceControl x:Name="SliceEditor" Grid.Row="1"
+                                      ViewModel="{Binding}" Margin="8,0,8,8" />
+      </Grid>
+    </Border>
+
     <Border DockPanel.Dock="Bottom" Height="178" Background="#202020">
       <controls:MixerPanel x:Name="Mixer" ViewModel="{Binding}" />
     </Border>

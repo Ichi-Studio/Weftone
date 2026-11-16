@@ -32,6 +32,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IFileDialogService _dialogs;
     private readonly RecoveryStore? _recovery;
     private readonly PluginParameterCatalog? _pluginCatalog;
+    private bool _sliceGesture;
     private bool _pluginParamGesture;
     private Channel? _pluginParamChannel;
     private uint _pluginParamId;
@@ -178,6 +179,100 @@ public partial class MainWindowViewModel : ObservableObject
     public double GetMasterAutomationDisplayValue()
         => AutomationMath.Evaluate(
             _session.Document.MasterVolumePoints, _session.Document.MasterVolume, PlayheadTick);
+
+    /// <summary>采样通道档位（Mixer 通道属性，SPEC M4 D6）：六档固定表。</summary>
+    public IReadOnlyList<double> StretchSpeedSteps => AssetPreparer.StretchSpeedSteps;
+
+    /// <summary>设置采样通道拉伸档位（命令入撤销栈）。</summary>
+    public void SetChannelStretchSpeed(Channel channel, double speed)
+    {
+        if (channel.Kind != ChannelKind.Sampler)
+        {
+            return;
+        }
+        double target = AssetPreparer.NearestStretchStep(speed);
+        if (Math.Abs(channel.StretchSpeed - target) < 1e-9)
+        {
+            return;
+        }
+        _session.Execute(new SetChannelStretchSpeedCommand(channel.Id, channel.StretchSpeed, target));
+        AfterEdit();
+    }
+
+    /// <summary>开关切片演奏（命令入撤销栈；开启时强制档位 1.0）。</summary>
+    public void SetChannelSliceMode(Channel channel, bool enabled)
+    {
+        if (channel.Kind != ChannelKind.Sampler || channel.SliceMode == enabled)
+        {
+            return;
+        }
+        _session.Execute(new SetChannelSliceModeCommand(channel.Id, channel.SliceMode, enabled));
+        AfterEdit();
+    }
+
+    /// <summary>切片编辑面板当前通道（null=未选）。</summary>
+    [ObservableProperty]
+    private Channel? _selectedSliceChannel;
+
+    /// <summary>采样通道（切片编辑面板与 Mixer 属性用）。</summary>
+    public IReadOnlyList<Channel> SamplerChannels =>
+        [.. _session.Document.Channels.Where(c => c.Kind == ChannelKind.Sampler)];
+
+    /// <summary>资产帧数（波形面板横轴映射）。</summary>
+    public long GetAssetFrameCount(string assetId)
+        => _session.Document.Assets.FirstOrDefault(a => a.Id == assetId) is { } asset
+            ? _session.GetAssetPeaks(assetId).Length * 256L
+            : 0;
+
+    /// <summary>资产波形峰值（切片编辑面板）。</summary>
+    public float[] GetAssetPeaks(string assetId) => _session.GetAssetPeaks(assetId);
+
+    /// <summary>资产的切片点（样本帧域）。</summary>
+    public IReadOnlyList<long> GetSlicePoints(string assetId)
+        => _session.Document.Assets.FirstOrDefault(a => a.Id == assetId)?.SlicePoints ?? [];
+
+    /// <summary>切片点手势：拖动中每步以「当前帧 → 新帧」执行，事务合并为单条撤销。</summary>
+    public void BeginSlicePointDrag()
+    {
+        if (_sliceGesture)
+        {
+            return;
+        }
+        _session.BeginTransaction("移动切片点");
+        _sliceGesture = true;
+    }
+
+    public void DragSlicePoint(string assetId, long fromFrame, long toFrame)
+    {
+        if (!_sliceGesture)
+        {
+            return;
+        }
+        _session.Execute(new MoveSlicePointCommand(assetId, fromFrame, Math.Max(0, toFrame)));
+    }
+
+    public void EndSlicePointDrag()
+    {
+        if (!_sliceGesture)
+        {
+            return;
+        }
+        _sliceGesture = false;
+        _session.EndTransaction();
+        AfterEdit();
+    }
+
+    public void AddSlicePoint(string assetId, long frame)
+    {
+        _session.Execute(new AddSlicePointCommand(assetId, Math.Max(0, frame)));
+        AfterEdit();
+    }
+
+    public void RemoveSlicePoint(string assetId, long frame)
+    {
+        _session.Execute(new RemoveSlicePointCommand(assetId, frame));
+        AfterEdit();
+    }
 
     /// <summary>插件参数显示值（Mixer 参数面板只读显示，竖切 4）：lane 有曲线按播放头求值。</summary>
     public double GetPluginParamDisplayValue(Channel channel, uint paramId, double fallback)
@@ -850,11 +945,20 @@ public partial class MainWindowViewModel : ObservableObject
         AfterEdit();
     }
 
+    partial void OnSelectedSliceChannelChanged(Channel? value)
+    {
+        SliceEditorRefresh?.Invoke();
+    }
+
+    /// <summary>切片编辑面板刷新回调（由宿主挂载，控件重取波形与切片点）。</summary>
+    public Action? SliceEditorRefresh { get; set; }
+
     private void AfterEdit()
     {
         RefreshTitle();
         NotifyHistoryChanged();
         OnPropertyChanged(nameof(Channels));
+        OnPropertyChanged(nameof(SamplerChannels));
         OnPropertyChanged(nameof(MasterVolume));
         OnPropertyChanged(nameof(CurrentAutomationLane));
         OnPropertyChanged(nameof(PlayheadTick));

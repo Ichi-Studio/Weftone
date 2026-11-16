@@ -55,6 +55,8 @@ public partial class MainWindow : Window
         Roll.InvalidateVisual();
         Playlist.InvalidateVisual();
         Lane.InvalidateVisual();
+        SliceEditor.ReloadPeaks();
+        SliceEditor.InvalidateVisual();
     }
 
     protected override void OnOpened(EventArgs e)
@@ -63,6 +65,16 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
         {
             vm.CheckRecoveryOnStartup();
+            vm.SliceEditorRefresh = () =>
+            {
+                SliceEditor.ReloadPeaks();
+                SliceEditor.InvalidateVisual();
+            };
+            if (vm.SelectedSliceChannel is null && vm.SamplerChannels.Count > 0)
+            {
+                vm.SelectedSliceChannel = vm.SamplerChannels[0];
+            }
+            vm.SliceEditorRefresh();
             _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
             _positionTimer.Tick += (_, _) => vm.UpdatePosition();
             _positionTimer.Start();
