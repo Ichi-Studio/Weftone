@@ -289,6 +289,35 @@ public class WeftProjectStoreTests
     }
 
     [Test]
+    public void Effect_chain_roundtrips_through_schema()
+    {
+        var store = new WeftProjectStore();
+        var document = NewDocument();
+        var eq = new EffectSlot { Kind = EffectKind.Eq3Band };
+        eq.Parameters["low"] = 4.5;
+        eq.Parameters["high"] = -2.0;
+        var delay = new EffectSlot { Kind = EffectKind.Delay, Bypassed = true };
+        document.Channels[0].Effects.Slots.Add(eq);
+        document.Channels[0].Effects.Slots.Add(delay);
+        string package = Path.Combine(_workDir, "fx.weft");
+        store.Save(package, document, new Dictionary<string, string> { ["assets/kick.wav"] = WriteAsset() });
+
+        ProjectDocument loaded = store.Load(package).Document;
+        List<EffectSlot> chain = loaded.Channels[0].Effects.Slots;
+        Assert.Multiple(() =>
+        {
+            Assert.That(chain, Has.Count.EqualTo(2));
+            Assert.That(chain[0].Kind, Is.EqualTo(EffectKind.Eq3Band));
+            Assert.That(chain[0].Parameters["low"], Is.EqualTo(4.5));
+            Assert.That(chain[0].Parameters["high"], Is.EqualTo(-2.0));
+            Assert.That(chain[0].Bypassed, Is.False);
+            Assert.That(chain[1].Kind, Is.EqualTo(EffectKind.Delay));
+            Assert.That(chain[1].Bypassed, Is.True);
+            Assert.That(loaded.Channels[1].Effects.Slots, Is.Empty, "无效果通道不写字段");
+        });
+    }
+
+    [Test]
     public void Load_rejects_unknown_plugin_reference()
     {
         string package = Path.Combine(_workDir, "badplugin.weft");

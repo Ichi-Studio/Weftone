@@ -35,6 +35,8 @@ internal sealed class ChannelJson
     [JsonPropertyName("pan")] public double Pan { get; set; }
     [JsonPropertyName("assetId")] public string? AssetId { get; set; }
     [JsonPropertyName("pluginId")] public string? PluginId { get; set; }
+    [JsonPropertyName("effects"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<EffectJson>? Effects { get; set; }
     [JsonPropertyName("stretchSpeed")] public double? StretchSpeed { get; set; }
     [JsonPropertyName("pluginParameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PluginParamJson>? PluginParameters { get; set; }
@@ -53,6 +55,14 @@ internal sealed class PluginParamJson
 {
     [JsonPropertyName("id")] public uint Id { get; set; }
     [JsonPropertyName("value")] public double Value { get; set; }
+}
+
+/// <summary>效果槽（SPEC M5）：kind 字符串 + 参数字典 + 旁路。</summary>
+internal sealed class EffectJson
+{
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "";
+    [JsonPropertyName("bypassed")] public bool Bypassed { get; set; }
+    [JsonPropertyName("parameters")] public Dictionary<string, double>? Parameters { get; set; }
 }
 
 /// <summary>插件引用（SPEC M3）：id ↔ channel.pluginId；path 为本地 .clap 路径（插件不入包）。</summary>
@@ -120,6 +130,14 @@ internal static class SchemaMapper
                 PluginState = c.PluginStateEntry,
                 PluginStateSha256 = c.PluginStateSha256,
                 StretchSpeed = c.StretchSpeed == 1.0 ? null : c.StretchSpeed,
+                Effects = c.Effects.Slots.Count == 0
+                    ? null
+                    : c.Effects.Slots.Select(e => new EffectJson
+                    {
+                        Kind = e.Kind.ToString(),
+                        Bypassed = e.Bypassed,
+                        Parameters = e.Parameters.Count == 0 ? null : new Dictionary<string, double>(e.Parameters),
+                    }).ToList(),
                 PluginParameters = c.PluginParameters.Count == 0
                     ? null
                     : c.PluginParameters.Select(p => new PluginParamJson { Id = p.Id, Value = p.Value }).ToList(),
@@ -176,6 +194,26 @@ internal static class SchemaMapper
                 PluginStateSha256 = c.PluginStateSha256,
                 StretchSpeed = c.StretchSpeed ?? 1.0,
             });
+            if (c.Effects is not null)
+            {
+                foreach (EffectJson e in c.Effects)
+                {
+                    var slot = new EffectSlot
+                    {
+                        Kind = ParseEffectKind(e.Kind),
+                        Bypassed = e.Bypassed,
+                    };
+                    if (e.Parameters is not null)
+                    {
+                        foreach (KeyValuePair<string, double> param in e.Parameters)
+                        {
+                            Require(double.IsFinite(param.Value), $"效果参数非有限值: {param.Key}={param.Value}");
+                            slot.Parameters[param.Key] = param.Value;
+                        }
+                    }
+                    document.Channels[^1].Effects.Slots.Add(slot);
+                }
+            }
             if (c.PluginParameters is not null)
             {
                 foreach (PluginParamJson param in c.PluginParameters)
@@ -299,6 +337,15 @@ internal static class SchemaMapper
             $"主控音量越界: {document.MasterVolume}");
         return document;
     }
+
+    private static EffectKind ParseEffectKind(string kind) => kind switch
+    {
+        nameof(EffectKind.Eq3Band) => EffectKind.Eq3Band,
+        nameof(EffectKind.Compressor) => EffectKind.Compressor,
+        nameof(EffectKind.Delay) => EffectKind.Delay,
+        nameof(EffectKind.Reverb) => EffectKind.Reverb,
+        _ => throw new InvalidProjectException($"未知效果器类型: {kind}"),
+    };
 
     private static string KindToString(ChannelKind kind) => kind switch
     {
