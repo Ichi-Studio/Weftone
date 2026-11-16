@@ -66,7 +66,12 @@ typedef struct {
     clap_host_t host;
     clap_input_events_t in_events;
     clap_output_events_t out_events;
-    clap_event_note_t events[WEFT_MAX_EVENTS];
+    // param_value 事件比 note 大：按最大成员联合存储，防别名越界写（堆损坏源）
+    union weft_clap_event_u {
+        clap_event_header_t header;
+        clap_event_note_t note;
+        clap_event_param_value_t param;
+    } events[WEFT_MAX_EVENTS];
     uint32_t event_count;
     clap_process_t process;
     clap_audio_buffer_t audio_out;
@@ -140,7 +145,9 @@ WEFT_EXPORT void* weft_clap_plugin_create(const char* path, const char* plugin_i
     }
     inited = 1;
 
-    self->host.clap_version = CLAP_VERSION;
+    self->host.clap_version.major = CLAP_VERSION_MAJOR;
+    self->host.clap_version.minor = CLAP_VERSION_MINOR;
+    self->host.clap_version.revision = CLAP_VERSION_REVISION;
     self->host.host_data = self;
     self->host.name = "Weftone";
     self->host.vendor = "Ichi Studio";
@@ -168,11 +175,11 @@ WEFT_EXPORT void* weft_clap_plugin_create(const char* path, const char* plugin_i
     // 端口契约（M3 D3）：0 号输出端口必须为立体声
     const clap_plugin_audio_ports_t* ports =
         (const clap_plugin_audio_ports_t*)plugin->get_extension(plugin, CLAP_EXT_AUDIO_PORTS);
-    clap_audio_port_info_t info;
+    clap_audio_port_info_t portInfo;
     if (!ports || !ports->count || !ports->get
         || ports->count(plugin, false) < 1
-        || !ports->get(plugin, 0, false, &info)
-        || info.channel_count != 2) {
+        || !ports->get(plugin, 0, false, &portInfo)
+        || portInfo.channel_count != 2) {
         goto fail;
     }
 
@@ -296,7 +303,8 @@ WEFT_EXPORT void weft_clap_plugin_process(void* handle, float* left, float* righ
             param->key = -1;
             continue;
         }
-        clap_event_note_t* note = &self->events[self->event_count++];
+        union weft_clap_event_u* slot = &self->events[self->event_count++];
+        clap_event_note_t* note = &slot->note;
         memset(note, 0, sizeof *note);
         note->header.time = (uint32_t)(events[i].frame < 0 ? 0 : events[i].frame);
         note->header.space_id = CLAP_CORE_EVENT_SPACE_ID;
