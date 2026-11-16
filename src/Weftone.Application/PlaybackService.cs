@@ -60,21 +60,24 @@ public sealed class PlaybackService : IDisposable
         }
     }
 
-    /// <summary>编辑后热更新：停止-交换-恢复，保留播放状态（短暂静音换零并发）。</summary>
+    /// <summary>编辑后热更新（M2 竖切 4 RCU）：不停后端直接换 plan，位置连续无静音缺口；
+    /// 采样率变化无法在位交换，回退停止-交换-恢复。</summary>
     public void UpdatePlan(RenderPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        bool wasPlaying = _playing;
-        Stop();
-        _renderer.Load(plan);
-        _totalSamples = plan.TotalSamples;
-        IsLooping = plan.LoopEndSample > plan.LoopStartSample;
-        if (wasPlaying)
+        if (_playing && _backend is not null && _openSampleRate != plan.SampleRate)
         {
+            _backend.Stop();
+            _renderer.Load(plan);
             EnsureOpen(plan.SampleRate, plan.Channels);
             _backend!.Start();
-            _playing = true;
         }
+        else
+        {
+            _renderer.SwapPlan(plan);
+        }
+        _totalSamples = plan.TotalSamples;
+        IsLooping = plan.LoopEndSample > plan.LoopStartSample;
     }
 
     private void EnsureOpen(int sampleRate, int channels)

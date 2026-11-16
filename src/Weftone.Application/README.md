@@ -11,8 +11,10 @@
   master volume 曲线同构；曲线声部 RenderVoice 只持 velocity。
 - `AutomationMath`（M2）：自动化 lane 的 tick 空间求值（FL 式端点 clamp + 线性插值），
   仅编译期/UI 使用。
-- `PlaybackService`（M1b）：实时播放用例。停止-交换-恢复（D2=a）、
-  采样率变化经后端工厂重建、`IsLooping` 供 UI 跳过到末尾自动停。
+- `PlaybackService`（M1b）：实时播放用例。UpdatePlan 走 RCU 交换
+  （M2 竖切 4）：同采样率不停后端原子换 plan（位置连续无静音缺口）；
+  采样率变化回退停止-交换-恢复；采样率变化经后端工厂重建、
+  `IsLooping` 供 UI 跳过到末尾自动停。
 - `EditSession`（M1b）：UI 线程单写者编辑会话——Document + CommandHistory +
   资产临时工作区；命令事务（Begin/EndTransaction）把拖拽手势合并为单条撤销；
   `ImportSample`（解码校验 → 工作区 → ImportSampleCommand 一步注册资产+通道）；

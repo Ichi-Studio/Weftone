@@ -10,6 +10,10 @@
   **自动化斜坡（M2）**：曲线声部按通道 `GainBreakpoints` 分段线性增益
   （块内逐样本插值，与 FadeTail/steal 包络相乘）；master 曲线同理后乘；
   游标回绕二分重定位，无自动化通道走静态预乘路径（行为位级不变）。
+  **RCU 交换（M2 竖切 4，ADR-0002）**：`SwapPlan` 仅 volatile 引用写入；
+  池声部直接持资产/曲线引用（plan 不可变 ⇒ 在飞声部与换 plan 解耦），
+  游标在音频线程内按当前绝对位置惰性二分重定位（playhead 前事件不补触发、
+  旧 pending 放弃计入 DroppedEvents）；旧 plan 由 GC 回收，无退役锁。
 - `SineEngine`：M0 正弦声部。双精度相位累积、零分配；`Callback` 预捕获委托，
   防止音频路径方法组转换分配。
 - `RtAssert`：分配断言（AGENTS.md §9）。仅 RT_ASSERT 构建生效，违规只计数

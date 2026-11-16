@@ -29,12 +29,14 @@ public class PlaybackServiceTests
     private sealed class FakeRenderer : IPlanRenderer
     {
         public int LoadCount;
+        public int SwapCount;
         public long Position { get; set; }
         public void Load(RenderPlan plan)
         {
             LoadCount++;
             Position = 0;
         }
+        public void SwapPlan(RenderPlan plan) => SwapCount++;
         public void Render(Span<float> interleaved) { }
     }
 
@@ -78,7 +80,7 @@ public class PlaybackServiceTests
     }
 
     [Test]
-    public void UpdatePlan_while_playing_does_stop_swap_start()
+    public void UpdatePlan_while_playing_swaps_without_stopping()
     {
         var backend = new FakeBackend();
         var renderer = new FakeRenderer();
@@ -87,15 +89,33 @@ public class PlaybackServiceTests
         playback.UpdatePlan(Plan());
         Assert.Multiple(() =>
         {
-            Assert.That(backend.StopCount, Is.EqualTo(1), "交换前先停止");
-            Assert.That(renderer.LoadCount, Is.EqualTo(2));
-            Assert.That(backend.StartCount, Is.EqualTo(2), "交换后恢复");
+            Assert.That(backend.StopCount, Is.EqualTo(0), "RCU：不停后端（SPEC M2 竖切 4）");
+            Assert.That(renderer.SwapCount, Is.EqualTo(1), "原子换入新 plan");
+            Assert.That(renderer.LoadCount, Is.EqualTo(1), "不重新 Load（transport 不复位）");
+            Assert.That(backend.StartCount, Is.EqualTo(1), "只保留首次启动");
             Assert.That(playback.IsPlaying, Is.True);
         });
     }
 
     [Test]
-    public void UpdatePlan_while_stopped_loads_without_starting()
+    public void UpdatePlan_playing_with_sample_rate_change_falls_back_to_restart()
+    {
+        var backend = new FakeBackend();
+        var renderer = new FakeRenderer();
+        using var playback = new PlaybackService(() => backend, renderer);
+        playback.Play(Plan(48_000));
+        playback.UpdatePlan(Plan(44_100));
+        Assert.Multiple(() =>
+        {
+            Assert.That(backend.StopCount, Is.EqualTo(1), "采样率无法在位交换");
+            Assert.That(renderer.LoadCount, Is.EqualTo(2), "复位装载");
+            Assert.That(backend.StartCount, Is.EqualTo(2), "恢复播放");
+            Assert.That(playback.IsPlaying, Is.True);
+        });
+    }
+
+    [Test]
+    public void UpdatePlan_while_stopped_swaps_without_starting()
     {
         var backend = new FakeBackend();
         var renderer = new FakeRenderer();
@@ -103,7 +123,7 @@ public class PlaybackServiceTests
         playback.UpdatePlan(Plan());
         Assert.Multiple(() =>
         {
-            Assert.That(renderer.LoadCount, Is.EqualTo(1));
+            Assert.That(renderer.SwapCount, Is.EqualTo(1));
             Assert.That(backend.StartCount, Is.EqualTo(0));
             Assert.That(playback.IsPlaying, Is.False);
         });
