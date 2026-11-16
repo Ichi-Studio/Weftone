@@ -323,6 +323,10 @@ node_modules/
 # Visual Studio 6 workspace and project file (working project files containing files to include in project)
 *.dsw
 *.dsp
+# 本仓目录/项目名以 ".Dsp" 结尾——*.dsp 在 Windows 大小写不敏感下误伤目录本身；
+# 父目录被排除时子否定无效，故目录与项目文件一并否定
+!src/Weftone.Adapters.Dsp/
+!src/Weftone.Adapters.Dsp/Weftone.Adapters.Dsp.csproj
 
 # Visual Studio 6 technical files
 *.ncb
