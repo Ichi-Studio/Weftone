@@ -91,7 +91,8 @@ ProjectDocument（可编辑 / 可撤销 / 富对象）
 | **M2**（已完成） | 自动化曲线（通道 vol/pan + master）、Autosave/Crash Recovery、RCU plan 交换 |
 | **M3**（已完成） | CLAP 宿主：扫描隔离进程、插件出声（实例表 RCU）、参数与 state 持久化、参数自动化 |
 | **M4**（已完成） | 时间拉伸（Signalsmith 变体预渲染）、切片演奏（SlicePoints + key 映射）、切片/拉伸 UI |
-| M5+ | 内置插件扩展、进程隔离、性能打磨、插件 UI 嵌入（高危另立专项） |
+| **M5**（已完成） | 内置效果链：EQ/压缩/延迟/FDN 混响、通道分组渲染、参数自动化、预设与面板 |
+| M6+ | 进程隔离、性能打磨、插件 UI 嵌入（高危另立专项）、CLAP 导出 |
 
 ## 构建
 
