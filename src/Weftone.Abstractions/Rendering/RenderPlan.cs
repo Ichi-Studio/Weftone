@@ -41,9 +41,13 @@ public struct GainBreakpoint
     public float GainRight;
 }
 
+/// <summary>插件静态参数值（竖切 3）：实例创建/换表时经 SetParameter 应用（D6：自动化事件点留竖切 4）。</summary>
+public sealed record PlanPluginParam(uint Id, double Value);
+
 /// <summary>插件槽（SPEC M3 D5）：plan 声部的 PluginSlot 索引此处；
 /// 实例由引擎侧实例表按 (PluginId, Path) 复用/创建（RCU 换表），plan 保持纯数据。</summary>
-public sealed record PlanPluginSlot(string PluginId, string FilePath);
+public sealed record PlanPluginSlot(
+    string PluginId, string FilePath, int ChannelId, IReadOnlyList<PlanPluginParam> Params);
 
 /// <summary>采样资产数据：解码并重采样到工程采样率后的 f32 交错样本。</summary>
 public sealed class PlanAsset

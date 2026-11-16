@@ -20,8 +20,10 @@ public partial class App : Avalonia.Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             // 组合根（AGENTS.md §4：DI 只在组合根）：装配 Application + Adapters + Engine。
+            var pluginFactory = new Adapters.Plugins.Clap.ClapInstanceFactory();
             var session = new EditSession(
-                new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer());
+                new WeftProjectStore(), new DrWavDecoder(), new LinearResampler(), new PlanRenderer(),
+                pluginFactory);
             try
             {
                 session.NewDemo();
@@ -31,11 +33,12 @@ public partial class App : Avalonia.Application
                 // native 未构建或解码失败：以空工程启动，用户可手动打开工程
             }
 
-            var playback = new PlaybackService(() => new MiniaudioBackend(), new PlanRenderer());
+            var playback = new PlaybackService(() => new MiniaudioBackend(), new PlanRenderer(), pluginFactory);
+            var pluginCatalog = new PluginParameterCatalog(pluginFactory);
             var recovery = new RecoveryStore();
             MainWindow? window = null;
             var dialogs = new FileDialogService(() => window);
-            var viewModel = new MainWindowViewModel(session, playback, dialogs, recovery);
+            var viewModel = new MainWindowViewModel(session, playback, dialogs, recovery, pluginCatalog);
             window = new MainWindow { DataContext = viewModel };
             desktop.MainWindow = window;
             desktop.Exit += (_, _) =>

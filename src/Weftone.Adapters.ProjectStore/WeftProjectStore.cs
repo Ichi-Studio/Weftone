@@ -67,10 +67,32 @@ public sealed class WeftProjectStore : IProjectStore
             }
         }
 
-        return new LoadedProject(document, asset => OpenAssetStream(path, asset.Path));
+        foreach (Channel channel in document.Channels)
+        {
+            if (string.IsNullOrEmpty(channel.PluginStateEntry))
+            {
+                continue;
+            }
+            ZipArchiveEntry? stateEntry = zip.GetEntry(channel.PluginStateEntry);
+            if (stateEntry is null)
+            {
+                throw new InvalidProjectException($"插件状态缺失: {channel.PluginStateEntry}");
+            }
+            using Stream stream = stateEntry.Open();
+            string actual = ComputeSha256(stream);
+            if (!string.Equals(actual, channel.PluginStateSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidProjectException(
+                    $"插件状态 SHA256 不匹配: {channel.PluginStateEntry} 期望 {channel.PluginStateSha256} 实际 {actual}");
+            }
+        }
+
+        return new LoadedProject(document, asset => OpenAssetStream(path, asset.Path),
+            entryPath => OpenAssetStream(path, entryPath));
     }
 
-    public void Save(string path, ProjectDocument document, IReadOnlyDictionary<string, string> assetSourceFiles)
+    public void Save(string path, ProjectDocument document, IReadOnlyDictionary<string, string> assetSourceFiles,
+        IReadOnlyDictionary<int, string>? pluginStateFiles = null)
     {
         string fullPath = Path.GetFullPath(path);
         string? dir = Path.GetDirectoryName(fullPath);
@@ -107,6 +129,28 @@ public sealed class WeftProjectStore : IProjectStore
             using Stream target = entry.Open();
             source.CopyTo(target);
         }
+
+        if (pluginStateFiles is not null)
+        {
+            foreach (KeyValuePair<int, string> pair in pluginStateFiles)
+            {
+                Channel? channel = document.Channels.FirstOrDefault(c => c.Id == pair.Key);
+                if (channel is null)
+                {
+                    throw new InvalidProjectException($"插件状态源对应未知 channel: {pair.Key}");
+                }
+                string entryPath = $"presets/state-{pair.Key}.bin";
+                using (Stream source = File.OpenRead(pair.Value))
+                {
+                    channel.PluginStateSha256 = ComputeSha256(source);
+                    source.Position = 0;
+                    ZipArchiveEntry stateEntry = zip.CreateEntry(entryPath);
+                    using Stream target = stateEntry.Open();
+                    source.CopyTo(target);
+                }
+                channel.PluginStateEntry = entryPath;
+            }
+        }
     }
 
     private static Stream OpenAssetStream(string packagePath, string assetPath)
@@ -136,7 +180,8 @@ public sealed class WeftProjectStore : IProjectStore
             throw new InvalidProjectException($"非法 zip 条目: {name}");
         }
         if (name != "project.json" && name != "metadata.json"
-            && !name.StartsWith("assets/", StringComparison.Ordinal))
+            && !name.StartsWith("assets/", StringComparison.Ordinal)
+            && !name.StartsWith("presets/", StringComparison.Ordinal))
         {
             throw new InvalidProjectException($"非白名单 zip 条目: {name}");
         }

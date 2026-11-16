@@ -129,7 +129,9 @@ public sealed class DocumentCompiler
                 throw new InvalidOperationException($"插件 {reference.Id} 缺少 .clap 路径");
             }
             slotByChannel[channel.Id] = list.Count;
-            list.Add(new PlanPluginSlot(reference.Id, reference.Path));
+            list.Add(new PlanPluginSlot(
+                reference.Id, reference.Path, channel.Id,
+                [.. channel.PluginParameters.Select(p => new PlanPluginParam(p.Id, p.Value))]));
         }
         slots = [.. list];
         return slotByChannel;

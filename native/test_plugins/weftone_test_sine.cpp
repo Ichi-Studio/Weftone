@@ -4,6 +4,7 @@
 // 许可：GPL-3.0-or-later（随主仓，不依赖任何专有代码）。
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -25,6 +26,9 @@ static const clap_plugin_descriptor_t k_descriptor = {
 };
 
 #define WEFT_MAX_VOICES 16
+// 参数 id（clap_id = uint32）
+#define WEFT_PARAM_GAIN 1
+#define WEFT_PARAM_TUNE 2
 
 static const double k_two_pi = 6.283185307179586476925286766559;
 
@@ -40,6 +44,8 @@ typedef struct {
     clap_plugin_t plugin;
     const clap_host_t* host;
     double sample_rate;
+    double gain;    // 0..1，默认 0.25
+    double tune;    // -24..24 半音，默认 0
     sine_voice_t voices[WEFT_MAX_VOICES];
 } sine_plugin_t;
 
@@ -64,7 +70,7 @@ static void note_on(sine_plugin_t* self, int16_t key, int16_t channel, double ve
             self->voices[i].key = key;
             self->voices[i].channel = channel;
             self->voices[i].phase = 0;
-            self->voices[i].phase_delta = k_two_pi * key_to_frequency(key) / self->sample_rate;
+            self->voices[i].phase_delta = k_two_pi * key_to_frequency(key) * pow(2.0, self->tune / 12.0) / self->sample_rate;
             return;
         }
     }
@@ -136,6 +142,20 @@ static clap_process_status sine_process(const struct clap_plugin* plugin, const 
             } else if (header->time == n && header->type == CLAP_EVENT_NOTE_OFF) {
                 const clap_event_note_t* note = (const clap_event_note_t*)header;
                 note_off(self, note->key, note->channel);
+            } else if (header->time == n && header->type == CLAP_EVENT_PARAM_VALUE) {
+                const clap_event_param_value_t* param = (const clap_event_param_value_t*)header;
+                if (param->param_id == WEFT_PARAM_GAIN) {
+                    self->gain = param->value;
+                } else if (param->param_id == WEFT_PARAM_TUNE) {
+                    self->tune = param->value;
+                    for (int i = 0; i < WEFT_MAX_VOICES; i++) {
+                        if (self->voices[i].active) {
+                            self->voices[i].phase_delta =
+                                k_two_pi * key_to_frequency(self->voices[i].key)
+                                    * pow(2.0, self->tune / 12.0) / self->sample_rate;
+                        }
+                    }
+                }
             }
             next_event++;
         }
@@ -148,7 +168,7 @@ static clap_process_status sine_process(const struct clap_plugin* plugin, const 
             if (!voice->active) {
                 continue;
             }
-            sample += (float)(sin(voice->phase) * 0.25);
+            sample += (float)(sin(voice->phase) * self->gain);
             voice->phase += voice->phase_delta;
             if (voice->phase >= k_two_pi) {
                 voice->phase -= k_two_pi;
@@ -175,7 +195,7 @@ static bool ports_get(const struct clap_plugin* plugin, uint32_t index, bool is_
     }
     memset(info, 0, sizeof *info);
     info->id = 0;
-    strncpy(info->name, "output", CLAP_NAME_SIZE - 1);
+    snprintf(info->name, CLAP_NAME_SIZE, "%s", "output");
     info->flags = CLAP_AUDIO_PORT_IS_MAIN;
     info->channel_count = 2;
     info->port_type = CLAP_PORT_STEREO;
@@ -188,11 +208,131 @@ static const clap_plugin_audio_ports_t k_audio_ports = {
     ports_get,
 };
 
+
+// ---- params：gain / tune（竖切 3） ----
+static const clap_param_info_t k_params[] = {
+    { WEFT_PARAM_GAIN, CLAP_PARAM_IS_AUTOMATABLE, NULL, "Gain", "", 0.0, 1.0, 0.25 },
+    { WEFT_PARAM_TUNE, CLAP_PARAM_IS_AUTOMATABLE, NULL, "Tune", "", -24.0, 24.0, 0.0 },
+};
+
+static uint32_t params_count(const struct clap_plugin* plugin)
+{
+    (void)plugin;
+    return 2;
+}
+
+static bool params_get_info(const struct clap_plugin* plugin, uint32_t index, clap_param_info_t* info)
+{
+    (void)plugin;
+    if (index >= 2) {
+        return false;
+    }
+    *info = k_params[index];
+    return true;
+}
+
+static bool params_get_value(const struct clap_plugin* plugin, clap_id id, double* out)
+{
+    const sine_plugin_t* self = (const sine_plugin_t*)plugin->plugin_data;
+    if (id == WEFT_PARAM_GAIN) {
+        *out = self->gain;
+        return true;
+    }
+    if (id == WEFT_PARAM_TUNE) {
+        *out = self->tune;
+        return true;
+    }
+    return false;
+}
+
+static bool params_value_to_text(const struct clap_plugin* plugin, clap_id id, double value, char* out, uint32_t size)
+{
+    (void)plugin;
+    (void)id;
+    snprintf(out, size, "%.3f", value);
+    return true;
+}
+
+static bool params_text_to_value(const struct clap_plugin* plugin, clap_id id, const char* text, double* out)
+{
+    (void)plugin;
+    (void)id;
+    char* end = NULL;
+    double value = strtod(text, &end);
+    if (end == text) {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+static void params_flush(const struct clap_plugin* plugin, const clap_input_events_t* in, const clap_output_events_t* out)
+{
+    (void)plugin;
+    (void)in;
+    (void)out;
+}
+
+static const clap_plugin_params_t k_params_ext = {
+    params_count,
+    params_get_info,
+    params_get_value,
+    params_value_to_text,
+    params_text_to_value,
+    params_flush,
+};
+
+static bool state_save(const struct clap_plugin* plugin, const clap_ostream_t* stream)
+{
+    const sine_plugin_t* self = (const sine_plugin_t*)plugin->plugin_data;
+    double payload[2] = { self->gain, self->tune };
+    return stream->write(stream, payload, sizeof payload) == (int64_t)sizeof payload;
+}
+
+static bool state_load(const struct clap_plugin* plugin, const clap_istream_t* stream)
+{
+    sine_plugin_t* self = (sine_plugin_t*)plugin->plugin_data;
+    double payload[2] = { 0, 0 };
+    if (stream->read(stream, payload, sizeof payload) != (int64_t)sizeof payload) {
+        return false;
+    }
+    self->gain = payload[0];
+    self->tune = payload[1];
+    // tune 变化须重算在飞声部频率
+    for (int i = 0; i < WEFT_MAX_VOICES; i++) {
+        if (self->voices[i].active) {
+            self->voices[i].phase_delta =
+                k_two_pi * key_to_frequency(self->voices[i].key) * pow(2.0, self->tune / 12.0) / self->sample_rate;
+        }
+    }
+    return true;
+}
+
+static const clap_plugin_state_t k_state_ext = { state_save, state_load };
+
+// ---- latency：固定 32 样本（竖切 3 报告验证用；宿主不补偿） ----
+static uint32_t latency_get(const struct clap_plugin* plugin)
+{
+    (void)plugin;
+    return 32;
+}
+
+static const clap_plugin_latency_t k_latency_ext = { latency_get };
+
 static const void* sine_get_extension(const struct clap_plugin* plugin, const char* id)
 {
     (void)plugin;
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
         return &k_audio_ports;
+    }
+    if (strcmp(id, CLAP_EXT_PARAMS) == 0) {
+        return &k_params_ext;
+    }
+    if (strcmp(id, CLAP_EXT_STATE) == 0) {
+        return &k_state_ext;
+    }
+    if (strcmp(id, CLAP_EXT_LATENCY) == 0) {
+        return &k_latency_ext;
     }
     return NULL;
 }
@@ -207,6 +347,8 @@ static const clap_plugin_t* sine_create(const clap_host_t* host)
     }
     self->host = host;
     self->sample_rate = 48000.0;
+    self->gain = 0.25;
+    self->tune = 0.0;
     self->plugin.desc = &k_descriptor;
     self->plugin.plugin_data = self;
     self->plugin.init = sine_init;

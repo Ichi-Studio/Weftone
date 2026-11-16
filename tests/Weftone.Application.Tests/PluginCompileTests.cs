@@ -32,7 +32,10 @@ public class PluginCompileTests
         Assert.Multiple(() =>
         {
             Assert.That(plan.PluginSlots, Has.Length.EqualTo(1), "每 plugin 通道一槽");
-            Assert.That(plan.PluginSlots[0], Is.EqualTo(new PlanPluginSlot("test.sine", @"C:\plug\test.clap")));
+            Assert.That(plan.PluginSlots[0].PluginId, Is.EqualTo("test.sine"));
+            Assert.That(plan.PluginSlots[0].FilePath, Is.EqualTo(@"C:\plug\test.clap"));
+            Assert.That(plan.PluginSlots[0].ChannelId, Is.EqualTo(1));
+            Assert.That(plan.PluginSlots[0].Params, Is.Empty);
             Assert.That(plan.Voices, Has.Length.EqualTo(2));
         });
         RenderVoice pluginVoice = plan.Voices.Single(v => v.Kind == RenderVoiceKind.Plugin);

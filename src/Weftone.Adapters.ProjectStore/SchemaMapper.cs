@@ -35,10 +35,21 @@ internal sealed class ChannelJson
     [JsonPropertyName("pan")] public double Pan { get; set; }
     [JsonPropertyName("assetId")] public string? AssetId { get; set; }
     [JsonPropertyName("pluginId")] public string? PluginId { get; set; }
+    [JsonPropertyName("pluginParameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PluginParamJson>? PluginParameters { get; set; }
+    [JsonPropertyName("pluginState")] public string? PluginState { get; set; }
+    [JsonPropertyName("pluginStateSha256")] public string? PluginStateSha256 { get; set; }
     [JsonPropertyName("volumePoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<AutomationPointJson>? VolumePoints { get; set; }
     [JsonPropertyName("panPoints"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<AutomationPointJson>? PanPoints { get; set; }
+}
+
+/// <summary>插件参数静态值（SPEC M3 竖切 3）。</summary>
+internal sealed class PluginParamJson
+{
+    [JsonPropertyName("id")] public uint Id { get; set; }
+    [JsonPropertyName("value")] public double Value { get; set; }
 }
 
 /// <summary>插件引用（SPEC M3）：id ↔ channel.pluginId；path 为本地 .clap 路径（插件不入包）。</summary>
@@ -101,6 +112,11 @@ internal static class SchemaMapper
             {
                 Id = c.Id, Name = c.Name, Kind = KindToString(c.Kind),
                 Volume = c.Volume, Pan = c.Pan, AssetId = c.AssetId, PluginId = c.PluginId,
+                PluginState = c.PluginStateEntry,
+                PluginStateSha256 = c.PluginStateSha256,
+                PluginParameters = c.PluginParameters.Count == 0
+                    ? null
+                    : c.PluginParameters.Select(p => new PluginParamJson { Id = p.Id, Value = p.Value }).ToList(),
                 VolumePoints = MapLane(c.VolumePoints),
                 PanPoints = MapLane(c.PanPoints),
             }).ToList(),
@@ -148,7 +164,16 @@ internal static class SchemaMapper
                 Pan = c.Pan,
                 AssetId = c.AssetId,
                 PluginId = c.PluginId,
+                PluginStateEntry = c.PluginState,
+                PluginStateSha256 = c.PluginStateSha256,
             });
+            if (c.PluginParameters is not null)
+            {
+                foreach (PluginParamJson param in c.PluginParameters)
+                {
+                    document.Channels[^1].PluginParameters.Add(new PluginParameterValue(param.Id, param.Value));
+                }
+            }
             document.Channels[^1].VolumePoints.AddRange(ParseLane(c.VolumePoints,
                 $"channel {c.Id} volumePoints", 0, 2));
             document.Channels[^1].PanPoints.AddRange(ParseLane(c.PanPoints,
@@ -189,6 +214,12 @@ internal static class SchemaMapper
                 Require(!string.IsNullOrEmpty(c.PluginId), $"plugin channel {c.Id} 缺少 pluginId");
                 Require(document.Plugins.Any(p => p.Id == c.PluginId),
                     $"channel {c.Id} 引用未知 plugin {c.PluginId}");
+            }
+            if (!string.IsNullOrEmpty(c.PluginState))
+            {
+                Require(c.PluginState!.StartsWith("presets/", StringComparison.Ordinal),
+                    $"channel {c.Id} 插件状态路径越界: {c.PluginState}");
+                Require(IsHex64(c.PluginStateSha256 ?? ""), $"channel {c.Id} 插件状态 SHA256 非法");
             }
             Require(c.Volume is >= 0 and <= 2, $"channel {c.Id} 音量越界: {c.Volume}");
             Require(c.Pan is >= -1 and <= 1, $"channel {c.Id} 声像越界: {c.Pan}");

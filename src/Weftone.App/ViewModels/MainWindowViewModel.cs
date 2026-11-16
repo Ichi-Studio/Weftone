@@ -1,6 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Weftone.Abstractions.Plugins;
 using Weftone.Abstractions.Rendering;
 using Weftone.App.Services;
 using Weftone.Application;
@@ -28,6 +29,11 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly PlaybackService _playback;
     private readonly IFileDialogService _dialogs;
     private readonly RecoveryStore? _recovery;
+    private readonly PluginParameterCatalog? _pluginCatalog;
+    private bool _pluginParamGesture;
+    private Channel? _pluginParamChannel;
+    private uint _pluginParamId;
+    private double _pluginParamFrom;
     private NoteGesture _gesture;
     private Note? _gestureNote;
     private long _gestureFromTick;
@@ -181,7 +187,7 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public MainWindowViewModel(EditSession session, PlaybackService playback, IFileDialogService dialogs,
-        RecoveryStore? recovery = null)
+        RecoveryStore? recovery = null, PluginParameterCatalog? pluginCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(playback);
@@ -190,9 +196,13 @@ public partial class MainWindowViewModel : ObservableObject
         _playback = playback;
         _dialogs = dialogs;
         _recovery = recovery;
+        _pluginCatalog = pluginCatalog;
         _tempo = session.Document.Tempo;
         RefreshTitle();
     }
+
+    /// <summary>插件参数目录（SPEC M3 竖切 3）：Mixer 参数面板经此取描述（临时实例+缓存）。</summary>
+    public PluginParameterCatalog? PluginCatalog => _pluginCatalog;
 
     public bool CanUndo => _session.History.CanUndo;
 
@@ -201,6 +211,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void Play()
     {
+        _playback.RestorePluginStates(_session.PluginStates);
         if (IsSongMode)
         {
             _playback.Play(_session.Compile());
@@ -251,6 +262,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void OnDocumentReplaced()
     {
+        _playback.RestorePluginStates(_session.PluginStates);
         Tempo = _session.Document.Tempo;
         SelectedPattern = Patterns.FirstOrDefault();
         RefreshAutomationTargets();
@@ -395,6 +407,11 @@ public partial class MainWindowViewModel : ObservableObject
         if (path is null)
         {
             return;
+        }
+        if (_playback.HasPluginHost)
+        {
+            // 保存前抓取实例 state（含插件内部随机种子/滤波状态，SPEC M3 竖切 3）
+            _session.PluginStates = _playback.CapturePluginStates(CompileCurrent());
         }
         _session.Save(path);
         _recovery?.RemoveStale(path);
@@ -730,6 +747,58 @@ public partial class MainWindowViewModel : ObservableObject
                 channel.Id, _mixFromVolume, _mixFromPan, channel.Volume, channel.Pan));
         }
         AfterEdit();
+    }
+
+    /// <summary>插件参数手势（SPEC M3 竖切 3）：拖动中直接改文档+换 plan 实时反映，释放一条命令入撤销栈。</summary>
+    public void BeginPluginParamEdit(Channel channel, uint parameterId)
+    {
+        _pluginParamGesture = true;
+        _pluginParamChannel = channel;
+        _pluginParamId = parameterId;
+        PluginParameterValue? existing = channel.PluginParameters.FirstOrDefault(p => p.Id == parameterId);
+        _pluginParamFrom = existing?.Value
+            ?? _pluginCatalog?.Get(channel, _session.Document)
+                .FirstOrDefault(p => p.Id == parameterId)?.DefaultValue
+            ?? 0;
+        _session.BeginTransaction("调整插件参数");
+    }
+
+    public void DragPluginParam(Channel channel, uint parameterId, double value)
+    {
+        if (!_pluginParamGesture || !ReferenceEquals(channel, _pluginParamChannel) || parameterId != _pluginParamId)
+        {
+            return;
+        }
+        _session.Execute(new SetPluginParameterCommand(channel.Id, parameterId, _pluginParamFrom, value));
+        if (_playback.IsPlaying)
+        {
+            _playback.UpdatePlan(CompileCurrent());
+        }
+    }
+
+    public void EndPluginParamEdit()
+    {
+        if (!_pluginParamGesture)
+        {
+            return;
+        }
+        _pluginParamGesture = false;
+        _pluginParamChannel = null;
+        _session.EndTransaction();
+        AfterEdit();
+    }
+
+    /// <summary>插件通道参数描述（Mixer 面板用；无目录或非插件通道返回空）。</summary>
+    public IReadOnlyList<PluginParameterInfo> GetPluginParameters(Channel channel)
+    {
+        try
+        {
+            return _pluginCatalog?.Get(channel, _session.Document) ?? [];
+        }
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
     }
 
     public void BeginMasterEdit()

@@ -20,8 +20,9 @@ CLAP 宿主桥（SPEC M3 D2=a，ADR-0007）：`weftone_clap_bridge` 共享库，
 随 CI 构建的自研 `.clap`（项目原创 GPL-3.0-or-later）：
 
 - `weftone_test_sine.clap`：确定性 sine 测试插件——16 复音、双精度相位、
-  立即 note off、振幅 0.25、audio-ports 立体声声明；CI 黄金基线
-  `m3-plugin-golden.wav` 用。
+  立即 note off、audio-ports 立体声声明；竖切 3 起带 gain/tune 参数
+  （PARAM_VALUE 事件生效）、16 字节 state chunk、latency=32 报告；
+  CI 黄金基线 `m3-plugin-golden.wav` 用。
 - `weftone_crash.clap`：`entry->init` 即 `abort()`——崩溃隔离测试用。
 
 C++ 编译（MSVC 的 C 模式不支持静态初始化取 const 对象地址，C2099）；

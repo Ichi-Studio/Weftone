@@ -37,12 +37,23 @@ public sealed class PlaybackService : IDisposable
 
     public bool IsPlaying => _playing;
 
+    /// <summary>是否带插件实例宿主（保存前 state 抓取判定，竖切 3）。</summary>
+    public bool HasPluginHost => _plugins is not null;
+
     /// <summary>当前 plan 是否带循环区间（Pattern 模式）。</summary>
     public bool IsLooping { get; private set; }
 
     public long Position => _renderer.Position;
 
     public long TotalSamples => _totalSamples;
+
+    /// <summary>注入工程 state chunk（竖切 3）：打开工程/恢复后、Play 前调用。</summary>
+    public void RestorePluginStates(IReadOnlyDictionary<int, byte[]> states)
+        => _plugins?.ApplyChannelStates(states);
+
+    /// <summary>抓取当前实例 state（保存工程用）；无插件宿主时返回空表。</summary>
+    public IReadOnlyDictionary<int, byte[]> CapturePluginStates(RenderPlan plan)
+        => _plugins?.CaptureChannelStates(plan) ?? new Dictionary<int, byte[]>();
 
     public void Play(RenderPlan plan)
     {

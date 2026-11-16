@@ -19,9 +19,15 @@ public sealed class ClapPluginInstance : IAudioPluginInstance
     {
         _instance = instance;
         _sampleRate = sampleRate;
+        Parameters = ClapBridgeNative.GetParameters(instance);
+        LatencySamples = ClapBridgeNative.GetLatency(instance);
     }
 
     public double SampleRate => _sampleRate;
+
+    public uint LatencySamples { get; }
+
+    public IReadOnlyList<PluginParameterInfo> Parameters { get; }
 
     /// <summary>测试插件的便捷 id（与 native/test_plugins/weftone_test_sine.cpp 对齐）。</summary>
     public static string TestSinePluginId => TestSineId;
@@ -58,6 +64,27 @@ public sealed class ClapPluginInstance : IAudioPluginInstance
             };
         }
         ClapBridgeNative.ProcessInstance(instance, left, right, _scratch.AsSpan(0, count));
+    }
+
+    public void SetParameter(uint paramId, double value)
+    {
+        nint instance = _instance;
+        ObjectDisposedException.ThrowIf(instance == 0, this);
+        ClapBridgeNative.SetParameter(instance, paramId, value);
+    }
+
+    public byte[]? SaveState()
+    {
+        nint instance = _instance;
+        ObjectDisposedException.ThrowIf(instance == 0, this);
+        return ClapBridgeNative.SaveState(instance);
+    }
+
+    public bool LoadState(byte[] data)
+    {
+        nint instance = _instance;
+        ObjectDisposedException.ThrowIf(instance == 0, this);
+        return ClapBridgeNative.LoadState(instance, data);
     }
 
     public void Dispose()

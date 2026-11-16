@@ -10,6 +10,12 @@ CLAP 插件适配器（SPEC M3 D1=a/D2=a，ADR-0004/0007），实现 Abstraction
 - `ClapBridgeNative`：`weftone_clap_bridge` P/Invoke（结构布局与
   `native/clap_bridge/weft_clap.c` 逐字段对齐）；库解析同 codecs 先例
   （`WEFTONE_NATIVE_DIR` → 应用目录 → 仓库 `native/build` 回溯）。
+- `ClapPluginInstance` / `ClapInstanceFactory`（竖切 2/3）：create 即
+  activate+start_processing、端口契约校验（0 号输出立体声）；
+  `Parameters` 创建时快照（含可自动化标志，供 UI/自动化枚举）、
+  `SetParameter` pending 于下次 process 头部派发（PARAM_VALUE 事件）、
+  `SaveState/LoadState`（内存流桥接，加载失败优雅降级）、
+  `LatencySamples` 报告（M3 只报告不补偿）。
 
 配套独立扫描进程：`tools/Weftone.PluginScan`（exe 名 `weftone-plugin-scan`），
 stdin/文件参数 → stdout 每行一个 camelCase JSON 描述；退出码 0=完成、2=失败。

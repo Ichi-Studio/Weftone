@@ -23,6 +23,8 @@ Avalonia UI 进程（组合根，AGENTS.md §4），引用 Application + Engine 
   右端 master；拖动中预览实时反映播放，释放时一条命令入撤销栈（标准控件组合）。
   M2：通道/master 带自动化曲线时推子只读禁用（"A" 标记），
   显示值随播放头按曲线求值更新（不做推子录制）。
+  M3 竖切 3：插件通道条内嵌参数滑条（描述经 PluginParameterCatalog，
+  值走 SetPluginParameterCommand 事务撤销，拖动实时换 plan）。
 - `Controls/PianoKeysControl`：128 键侧栏，纵向偏移与 Roll 同步滚动。
 - `Controls/PianoRollGeometry` / `PlaylistGeometry` / `AutomationLaneGeometry`：
   几何/命中纯函数（无 Avalonia 依赖，headless 单测）；时间轴 tick↔pixel 映射共用。

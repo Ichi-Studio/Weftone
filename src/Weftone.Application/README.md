@@ -19,7 +19,10 @@
   资产临时工作区；命令事务（Begin/EndTransaction）把拖拽手势合并为单条撤销；
   `ImportSample`（解码校验 → 工作区 → ImportSampleCommand 一步注册资产+通道）；
   `ExportWav`（Song 全时间轴离线渲染，float32 WAV，独立离线渲染器实例）。
-- `PluginInstanceHost`（M3 D5）：按 plan 槽表同步实例——(path,id,采样率) 相同
+- `PluginParameterCatalog`（M3 竖切 3）：按 (path,id,采样率) 经临时实例取参数描述并缓存，
+  Mixer 参数面板用；不触碰播放实例。
+- `PluginInstanceHost`（M3 D5/竖切 3）：Sync 时应用工程静态参数、
+  ApplyChannelStates/CaptureChannelStates 支撑 state chunk 持久化；按 plan 槽表同步实例——(path,id,采样率) 相同
   即复用（保插件内部状态），否则新建；多余实例隔代退役（in-process 近似，
   M6 out-of-process 收紧）。PlaybackService/ExportWav/ProjectRenderService 经
   `IPluginInstanceFactory` 端口注入。

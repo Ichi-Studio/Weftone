@@ -87,6 +87,9 @@ public sealed class EditSession : IDisposable
     }
 
     /// <summary>打开工程包。projectPathOverride 用于恢复区还原：从快照装载但记原工程路径并保持脏标记。</summary>
+    /// <summary>插件 state chunk（SPEC M3 竖切 3）：Open 时从包读入；Save 前由宿主抓取更新（写 presets/）。</summary>
+    public IReadOnlyDictionary<int, byte[]> PluginStates { get; set; } = new Dictionary<int, byte[]>();
+
     public void Open(string path, string? projectPathOverride = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -103,6 +106,22 @@ public sealed class EditSession : IDisposable
             }
             _assetSources[asset.Path] = localPath;
         }
+        var states = new Dictionary<int, byte[]>();
+        if (loaded.OpenEntry is not null)
+        {
+            foreach (Channel channel in Document.Channels)
+            {
+                if (string.IsNullOrEmpty(channel.PluginStateEntry))
+                {
+                    continue;
+                }
+                using Stream stream = loaded.OpenEntry(channel.PluginStateEntry);
+                using var memory = new MemoryStream();
+                stream.CopyTo(memory);
+                states[channel.Id] = memory.ToArray();
+            }
+        }
+        PluginStates = states;
         PrepareAssets();
         History.Clear();
         ProjectPath = projectPathOverride ?? path;
@@ -114,7 +133,18 @@ public sealed class EditSession : IDisposable
     public void Save(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
-        _store.Save(path, Document, _assetSources);
+        Dictionary<int, string>? stateFiles = null;
+        if (PluginStates.Count > 0)
+        {
+            stateFiles = new Dictionary<int, string>();
+            foreach (KeyValuePair<int, byte[]> pair in PluginStates)
+            {
+                string file = Path.Combine(_workspace, $"state-{pair.Key}.bin");
+                File.WriteAllBytes(file, pair.Value);
+                stateFiles[pair.Key] = file;
+            }
+        }
+        _store.Save(path, Document, _assetSources, stateFiles);
         ProjectPath = path;
         IsDirty = false;
     }

@@ -19,6 +19,11 @@ public class PluginVoiceRenderTests
         public bool Record = true;
         private bool _gate;
         public double SampleRate => 48_000;
+        public uint LatencySamples => 0;
+        public IReadOnlyList<PluginParameterInfo> Parameters => [];
+        public void SetParameter(uint paramId, double value) { }
+        public byte[]? SaveState() => null;
+        public bool LoadState(byte[] data) => false;
 
         public void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginNoteEvent> events)
         {
@@ -70,7 +75,7 @@ public class PluginVoiceRenderTests
         Channels = 2,
         TotalSamples = total,
         Voices = voices,
-        PluginSlots = [new PlanPluginSlot("fake", "fake.clap")],
+        PluginSlots = [new PlanPluginSlot("fake", "fake.clap", 1, [])],
     };
 
     [Test]
@@ -126,7 +131,7 @@ public class PluginVoiceRenderTests
             Channels = 2,
             TotalSamples = 300,
             Voices = [PluginVoice(0, 300)],
-            PluginSlots = [new PlanPluginSlot("fake", "f.clap")],
+            PluginSlots = [new PlanPluginSlot("fake", "f.clap", 1, [])],
             MasterGain = 0.5f,
         };
         var buffer = new float[2 * 300];

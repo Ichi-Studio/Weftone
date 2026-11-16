@@ -10,16 +10,36 @@ public enum PluginNoteEventKind : byte
 public readonly record struct PluginNoteEvent(
     PluginNoteEventKind Kind, int FrameOffset, int Key, int Channel, float Velocity);
 
+/// <summary>插件参数描述（竖切 3）：id/name/值域/默认值/可自动化标志（自动化用，竖切 4）。</summary>
+public sealed record PluginParameterInfo(
+    uint Id, string Name, double MinValue, double MaxValue, double DefaultValue, bool IsAutomatable);
+
 /// <summary>
 /// 音频线程调用的插件实例端口（SPEC M3 D5）：实现必须 RT 安全（零分配），
 /// 输出平面 float 缓冲由调用方提供；实例生命周期归引擎侧实例表（RCU 换表）。
+/// 参数/状态（竖切 3）：SetParameter 于下次 process 头部派发（非 RT 调用）；
+/// SaveState/LoadState 走 main-thread 约定（非 RT）。
 /// </summary>
 public interface IAudioPluginInstance : IDisposable
 {
     /// <summary>创建采样率（采样率变化须重建实例）。</summary>
     double SampleRate { get; }
 
+    /// <summary>插件报告的延迟样本数（M3 只报告不补偿）。</summary>
+    uint LatencySamples { get; }
+
+    /// <summary>参数描述（创建时快照）。</summary>
+    IReadOnlyList<PluginParameterInfo> Parameters { get; }
+
     void Process(Span<float> left, Span<float> right, ReadOnlySpan<PluginNoteEvent> events);
+
+    void SetParameter(uint paramId, double value);
+
+    /// <summary>导出二进制状态；插件无状态扩展返回 null。</summary>
+    byte[]? SaveState();
+
+    /// <summary>恢复状态；失败（chunk 失配等）返回 false，实例保持可用。</summary>
+    bool LoadState(byte[] data);
 }
 
 /// <summary>插件实例工厂端口（SPEC M3 D5）：按 (clapPath, pluginId, sampleRate) 创建实例，实现经 adapter。</summary>

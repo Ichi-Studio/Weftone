@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Weftone.Abstractions.Plugins;
 using Weftone.App.ViewModels;
 using Weftone.Domain;
 
@@ -147,6 +148,7 @@ public sealed class MixerPanel : ContentControl
             Width = 76,
             IsEnabled = !autoPan,
         };
+        var paramPanel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 2 };
 
         if (vm is not null)
         {
@@ -162,6 +164,56 @@ public sealed class MixerPanel : ContentControl
             if (autoPan)
             {
                 _autoValueUpdaters.Add(() => pan.Value = vm.GetAutomationDisplayValue(channel, AutomationParameter.Pan));
+            }
+        }
+
+        if (vm is not null && channel.Kind == ChannelKind.Plugin)
+        {
+            // 插件参数面板（SPEC M3 竖切 3）：描述经 PluginParameterCatalog（临时实例+缓存），
+            // 值走文档（SetPluginParameterCommand 事务撤销）；最多显示 4 个防溢出
+            foreach (PluginParameterInfo parameter in vm.GetPluginParameters(channel).Take(4))
+            {
+                PluginParameterValue? stored = channel.PluginParameters.FirstOrDefault(p => p.Id == parameter.Id);
+                double current = stored?.Value ?? parameter.DefaultValue;
+                var slider = new Slider
+                {
+                    Orientation = Orientation.Horizontal,
+                    Minimum = parameter.MinValue,
+                    Maximum = parameter.MaxValue,
+                    Value = current,
+                    Width = 76,
+                };
+                var label = new TextBlock
+                {
+                    Text = $"{parameter.Name} {current:0.###}",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0xF0, 0xE0)),
+                    TextAlignment = TextAlignment.Center,
+                };
+                bool dragging = false;
+                slider.AddHandler(PointerPressedEvent, (_, _) =>
+                {
+                    dragging = true;
+                    vm.BeginPluginParamEdit(channel, parameter.Id);
+                }, RoutingStrategies.Tunnel);
+                slider.AddHandler(PointerReleasedEvent, (_, _) =>
+                {
+                    if (dragging)
+                    {
+                        dragging = false;
+                        vm.EndPluginParamEdit();
+                    }
+                }, RoutingStrategies.Tunnel);
+                slider.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == Slider.ValueProperty && dragging)
+                    {
+                        label.Text = $"{parameter.Name} {slider.Value:0.###}";
+                        vm.DragPluginParam(channel, parameter.Id, slider.Value);
+                    }
+                };
+                paramPanel.Children.Add(slider);
+                paramPanel.Children.Add(label);
             }
         }
 
@@ -208,7 +260,7 @@ public sealed class MixerPanel : ContentControl
                 vm?.DragMixEdit(channel, channel.Volume, pan.Value);
             }
         };
-        return StripShell(isMaster: false, name, volume, volumeLabel, pan);
+        return StripShell(isMaster: false, name, volume, volumeLabel, pan, paramPanel);
     }
 
     private Control BuildMasterStrip()

@@ -68,6 +68,40 @@ public static class ClapBridgeNative
     private static unsafe extern void weft_clap_plugin_process(
         nint instance, float* left, float* right, int frames, NoteEventNative* events, int count);
 
+    [DllImport(LibName)]
+    private static extern uint weft_clap_plugin_param_count(nint instance);
+
+    [DllImport(LibName)]
+    private static extern bool weft_clap_plugin_param_info(nint instance, uint index,
+        [Out] out ParamInfoNative info);
+
+    [DllImport(LibName)]
+    private static extern void weft_clap_plugin_set_param(nint instance, uint paramId, double value);
+
+    [DllImport(LibName)]
+    private static extern bool weft_clap_plugin_save_state(nint instance,
+        out nint buffer, out int size);
+
+    [DllImport(LibName)]
+    private static extern bool weft_clap_plugin_load_state(nint instance, byte[] data, int size);
+
+    [DllImport(LibName)]
+    private static extern void weft_clap_free(nint pointer);
+
+    [DllImport(LibName)]
+    private static extern uint weft_clap_plugin_latency(nint instance);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    internal struct ParamInfoNative
+    {
+        public uint Id;
+        public int Automatable;
+        public double MinValue;
+        public double MaxValue;
+        public double DefaultValue;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string Name;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct NoteEventNative
     {
@@ -97,6 +131,49 @@ public static class ClapBridgeNative
     }
 
     public static void DestroyInstance(nint instance) => weft_clap_plugin_destroy(instance);
+
+    /// <summary>查询实例参数描述（竖切 3；创建时快照于 native 侧）。</summary>
+    public static List<PluginParameterInfo> GetParameters(nint instance)
+    {
+        var result = new List<PluginParameterInfo>();
+        uint count = weft_clap_plugin_param_count(instance);
+        for (uint i = 0; i < count; i++)
+        {
+            if (weft_clap_plugin_param_info(instance, i, out ClapBridgeNative.ParamInfoNative info))
+            {
+                result.Add(new PluginParameterInfo(
+                    info.Id, info.Name, info.MinValue, info.MaxValue, info.DefaultValue,
+                    info.Automatable != 0));
+            }
+        }
+        return result;
+    }
+
+    public static void SetParameter(nint instance, uint paramId, double value)
+        => weft_clap_plugin_set_param(instance, paramId, value);
+
+    public static byte[]? SaveState(nint instance)
+    {
+        if (!weft_clap_plugin_save_state(instance, out nint buffer, out int size) || buffer == 0)
+        {
+            return null;
+        }
+        try
+        {
+            var data = new byte[size];
+            Marshal.Copy(buffer, data, 0, size);
+            return data;
+        }
+        finally
+        {
+            weft_clap_free(buffer);
+        }
+    }
+
+    public static bool LoadState(nint instance, byte[] data)
+        => weft_clap_plugin_load_state(instance, data, data.Length);
+
+    public static uint GetLatency(nint instance) => weft_clap_plugin_latency(instance);
 
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
