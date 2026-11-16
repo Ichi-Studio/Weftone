@@ -95,6 +95,8 @@ public sealed class ClapScanner : IPluginScanner
                 ArgumentList = { file },
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
                 CreateNoWindow = true,
                 UseShellExecute = false,
             },

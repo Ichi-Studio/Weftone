@@ -21,6 +21,8 @@ public static class Program
 
     public static int Main(string[] args)
     {
+        // Windows 中文 locale 下 Console 默认 GBK——描述含中文时父进程按 UTF-8 解析会错位
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
         if (args.Length != 1)
         {
             Console.Error.WriteLine("用法: weftone-plugin-scan <file.clap>");
